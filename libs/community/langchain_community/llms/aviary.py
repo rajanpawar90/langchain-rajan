@@ -1,16 +1,21 @@
 import dataclasses
 import os
-from typing import Any, Dict, List, Mapping, Optional, Union, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Union
 
 import requests
+from dataclasses import field, fields
+from typing import ClassVar, Final
+from typing import TypeVar, Annotated
+from typing import get_args
+
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
 from langchain_core.pydantic_v1 import Extra, root_validator
 from langchain_core.utils import get_from_dict_or_env
 
-from langchain_community.llms.utils import enforce_stop_tokens
+TIMEOUT: Final = 60
 
-TIMEOUT = 60
+T = TypeVar("T")
 
 
 @dataclasses.dataclass
@@ -22,8 +27,8 @@ class AviaryBackend:
         bearer: The bearer token for the Aviary backend.
     """
 
-    backend_url: str
-    bearer: str
+    backend_url: str = field(init=False, default="")
+    bearer: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
         self.header = {"Authorization": self.bearer}
@@ -33,7 +38,7 @@ class AviaryBackend:
         aviary_url = os.getenv("AVIARY_URL")
         assert aviary_url, "AVIARY_URL must be set"
 
-        aviary_token = os.getenv("AVIARY_TOKEN", "")
+        aviary_token = os.getenv("AVIARY_TOKEN", None)
 
         bearer = f"Bearer {aviary_token}" if aviary_token else ""
         aviary_url += "/" if not aviary_url.endswith("/") else ""
@@ -114,7 +119,7 @@ class Aviary(LLM):
             output = light('How do you make fried rice?')
     """
 
-    model: str = "amazon/LightGPT"
+    model: Annotated[str, Extra("model_name")] = "amazon/LightGPT"
     aviary_url: Optional[str] = None
     aviary_token: Optional[str] = None
     # If True the prompt template for the model will be ignored.
@@ -152,14 +157,14 @@ class Aviary(LLM):
     def _identifying_params(self) -> Mapping[str, Any]:
         """Get the identifying parameters."""
         return {
-            "model_name": self.model,
-            "aviary_url": self.aviary_url,
+            key.name: value for key, value in self.dict().items() if key.name != "_llm_type"
         }
 
     @property
-    def _llm_type(self) -> str:
+    @classmethod
+    def _llm_type(cls) -> str:
         """Return type of llm."""
-        return f"aviary-{self.model.replace('/', '-')}"
+        return f"aviary-{cls.model.replace('/', '-')}"
 
     def _call(
         self,
