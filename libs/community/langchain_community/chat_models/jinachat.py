@@ -2,48 +2,62 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import (
     Any,
     AsyncIterator,
     Callable,
     Dict,
     Iterator,
+    Literal,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Tuple,
     Type,
     Union,
 )
 
-from langchain_core.callbacks import (
-    AsyncCallbackManagerForLLMRun,
-    CallbackManagerForLLMRun,
-)
-from langchain_core.language_models.chat_models import (
-    BaseChatModel,
-    agenerate_from_stream,
-    generate_from_stream,
-)
-from langchain_core.messages import (
-    AIMessage,
-    AIMessageChunk,
-    BaseMessage,
-    BaseMessageChunk,
-    ChatMessage,
-    ChatMessageChunk,
-    FunctionMessage,
-    HumanMessage,
-    HumanMessageChunk,
-    SystemMessage,
-    SystemMessageChunk,
-)
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from langchain_core.pydantic_v1 import Field, SecretStr, root_validator
-from langchain_core.utils import (
-    convert_to_secret_str,
-    get_from_dict_or_env,
-    get_pydantic_field_names,
+import openai
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+    FieldAliases,
+    PositiveFloat,
+    PositiveInt,
+    PrivateAttr,
+    RootValidator,
+    StrictBool,
+    StrictDict,
+    StrictFloat,
+    StrictInt,
+    StrictList,
+    StrictSet,
+    StrictStr,
+    StrictTuple,
+    ValidatedDict,
+    ValidatedOptional,
+    ValidatedSet,
+    ValidatedStrictDict,
+    ValidatedStrictList,
+    ValidatedStrictSet,
+    ValidatedStrictTuple,
+    ValidatedStrictUnion,
+    ValidatedStrictType,
+    ValidatedTuple,
+    ValidatedUnion,
+    conint,
+    constr,
+    nonpositive,
+    nonpositiveint,
+    past,
+    positive,
+    positivefloat,
+    redefined,
+    root_validator,
+    none_is_required,
 )
 from tenacity import (
     before_sleep_log,
@@ -56,102 +70,45 @@ from tenacity import (
 logger = logging.getLogger(__name__)
 
 
-def _create_retry_decorator(llm: JinaChat) -> Callable[[Any], Any]:
-    import openai
+class ChatGenerationChunk(NamedTuple):
+    """A single chunk of a chat generation."""
 
-    min_seconds = 1
-    max_seconds = 60
-    # Wait 2^x * 1 second between each retry starting with
-    # 4 seconds, then up to 10 seconds, then 10 seconds afterwards
-    return retry(
-        reraise=True,
-        stop=stop_after_attempt(llm.max_retries),
-        wait=wait_exponential(multiplier=1, min=min_seconds, max=max_seconds),
-        retry=(
-            retry_if_exception_type(openai.error.Timeout)
-            | retry_if_exception_type(openai.error.APIError)
-            | retry_if_exception_type(openai.error.APIConnectionError)
-            | retry_if_exception_type(openai.error.RateLimitError)
-            | retry_if_exception_type(openai.error.ServiceUnavailableError)
-        ),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
+    message: BaseMessageChunk
+    """The message chunk."""
+
+
+class JinaChatConfig(BaseModel):
+    """Configuration for JinaChat."""
+
+    temperature: PositiveFloat = Field(
+        0.7, title="Temperature", ge=0, le=1, description="Sampling temperature."
+    )
+    max_retries: PositiveInt = Field(
+        6, title="Max Retries", ge=0, description="Maximum number of retries."
+    )
+    streaming: bool = Field(
+        False, title="Streaming", description="Whether to stream the results."
+    )
+    request_timeout: Union[float, Tuple[float, float]] = Field(
+        None,
+        title="Request Timeout",
+        ge=0,
+        description="Timeout for requests to JinaChat completion API.",
+    )
+    max_tokens: Optional[int] = Field(
+        None, title="Max Tokens", ge=None, description="Maximum number of tokens."
     )
 
 
-async def acompletion_with_retry(llm: JinaChat, **kwargs: Any) -> Any:
-    """Use tenacity to retry the async completion call."""
-    retry_decorator = _create_retry_decorator(llm)
-
-    @retry_decorator
-    async def _completion_with_retry(**kwargs: Any) -> Any:
-        # Use OpenAI's async api https://github.com/openai/openai-python#async-api
-        return await llm.client.acreate(**kwargs)
-
-    return await _completion_with_retry(**kwargs)
-
-
-def _convert_delta_to_message_chunk(
-    _dict: Mapping[str, Any], default_class: Type[BaseMessageChunk]
-) -> BaseMessageChunk:
-    role = _dict.get("role")
-    content = _dict.get("content") or ""
-
-    if role == "user" or default_class == HumanMessageChunk:
-        return HumanMessageChunk(content=content)
-    elif role == "assistant" or default_class == AIMessageChunk:
-        return AIMessageChunk(content=content)
-    elif role == "system" or default_class == SystemMessageChunk:
-        return SystemMessageChunk(content=content)
-    elif role or default_class == ChatMessageChunk:
-        return ChatMessageChunk(content=content, role=role)
-    else:
-        return default_class(content=content)
-
-
-def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
-    role = _dict["role"]
-    if role == "user":
-        return HumanMessage(content=_dict["content"])
-    elif role == "assistant":
-        content = _dict["content"] or ""
-        return AIMessage(content=content)
-    elif role == "system":
-        return SystemMessage(content=_dict["content"])
-    else:
-        return ChatMessage(content=_dict["content"], role=role)
-
-
-def _convert_message_to_dict(message: BaseMessage) -> dict:
-    if isinstance(message, ChatMessage):
-        message_dict = {"role": message.role, "content": message.content}
-    elif isinstance(message, HumanMessage):
-        message_dict = {"role": "user", "content": message.content}
-    elif isinstance(message, AIMessage):
-        message_dict = {"role": "assistant", "content": message.content}
-    elif isinstance(message, SystemMessage):
-        message_dict = {"role": "system", "content": message.content}
-    elif isinstance(message, FunctionMessage):
-        message_dict = {
-            "role": "function",
-            "name": message.name,
-            "content": message.content,
-        }
-    else:
-        raise ValueError(f"Got unknown type {message}")
-    if "name" in message.additional_kwargs:
-        message_dict["name"] = message.additional_kwargs["name"]
-    return message_dict
-
-
 class JinaChat(BaseChatModel):
-    """`Jina AI` Chat models API.
+    """`JinaChat` Chat models API.
 
     To use, you should have the ``openai`` python package installed, and the
     environment variable ``JINACHAT_API_KEY`` set to your API key, which you
     can generate at https://chat.jina.ai/api.
 
     Any parameters that are valid to be passed to the openai.create call can be passed
-    in, even if not explicitly saved on this class.
+    in, even if not explicitly specified.
 
     Example:
         .. code-block:: python
@@ -160,36 +117,22 @@ class JinaChat(BaseChatModel):
             chat = JinaChat()
     """
 
-    @property
-    def lc_secrets(self) -> Dict[str, str]:
-        return {"jinachat_api_key": "JINACHAT_API_KEY"}
-
-    @classmethod
-    def is_lc_serializable(cls) -> bool:
-        """Return whether this model can be serialized by Langchain."""
-        return False
-
-    client: Any  #: :meta private:
-    temperature: float = 0.7
-    """What sampling temperature to use."""
-    model_kwargs: Dict[str, Any] = Field(default_factory=dict)
-    """Holds any model parameters valid for `create` call not explicitly specified."""
-    jinachat_api_key: Optional[SecretStr] = None
-    """Base URL path for API requests, 
-    leave blank if not using a proxy or service emulator."""
-    request_timeout: Optional[Union[float, Tuple[float, float]]] = None
-    """Timeout for requests to JinaChat completion API. Default is 600 seconds."""
-    max_retries: int = 6
-    """Maximum number of retries to make when generating."""
-    streaming: bool = False
-    """Whether to stream the results or not."""
-    max_tokens: Optional[int] = None
-    """Maximum number of tokens to generate."""
+    jinachat_api_key: ValidatedOptional[StrictStr] = Field(
+        default=None, title="API Key", description="JinaChat API Key."
+    )
+    model_kwargs: ValidatedStrictDict[StrictStr, Any] = Field(
+        default_factory=dict,
+        title="Model Keywords",
+        description="Holds any model parameters valid for `create` call not explicitly specified.",
+    )
+    _client: Any = PrivateAttr(default=openai.ChatCompletion)
+    _config: JinaChatConfig = Field(default_factory=JinaChatConfig)
 
     class Config:
         """Configuration for this pydantic object."""
 
         allow_population_by_field_name = True
+        arbitrary_types_allowed = True
 
     @root_validator(pre=True)
     def build_extra(cls, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +175,7 @@ class JinaChat(BaseChatModel):
                 "Please install it with `pip install openai`."
             )
         try:
-            values["client"] = openai.ChatCompletion
+            values["_client"] = openai.ChatCompletion
         except AttributeError:
             raise ValueError(
                 "`openai` has no `ChatCompletion` attribute, this is likely "
@@ -245,23 +188,21 @@ class JinaChat(BaseChatModel):
     def _default_params(self) -> Dict[str, Any]:
         """Get the default parameters for calling JinaChat API."""
         return {
-            "request_timeout": self.request_timeout,
-            "max_tokens": self.max_tokens,
-            "stream": self.streaming,
-            "temperature": self.temperature,
+            "request_timeout": self._config.request_timeout,
+            "max_tokens": self._config.max_tokens,
+            "stream": self._config.streaming,
+            "temperature": self._config.temperature,
             **self.model_kwargs,
         }
 
     def _create_retry_decorator(self) -> Callable[[Any], Any]:
-        import openai
-
         min_seconds = 1
         max_seconds = 60
         # Wait 2^x * 1 second between each retry starting with
         # 4 seconds, then up to 10 seconds, then 10 seconds afterwards
         return retry(
             reraise=True,
-            stop=stop_after_attempt(self.max_retries),
+            stop=stop_after_attempt(self._config.max_retries),
             wait=wait_exponential(multiplier=1, min=min_seconds, max=max_seconds),
             retry=(
                 retry_if_exception_type(openai.error.Timeout)
@@ -279,7 +220,7 @@ class JinaChat(BaseChatModel):
 
         @retry_decorator
         def _completion_with_retry(**kwargs: Any) -> Any:
-            return self.client.create(**kwargs)
+            return self._client.create(**kwargs)
 
         return _completion_with_retry(**kwargs)
 
@@ -324,7 +265,7 @@ class JinaChat(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        if self.streaming:
+        if self._config.streaming:
             stream_iter = self._stream(
                 messages=messages, stop=stop, run_manager=run_manager, **kwargs
             )
@@ -384,7 +325,7 @@ class JinaChat(BaseChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        if self.streaming:
+        if self._config.streaming:
             stream_iter = self._astream(
                 messages=messages, stop=stop, run_manager=run_manager, **kwargs
             )
@@ -398,7 +339,7 @@ class JinaChat(BaseChatModel):
     @property
     def _invocation_params(self) -> Mapping[str, Any]:
         """Get the parameters used to invoke the model."""
-        jinachat_creds: Dict[str, Any] = {
+        jinachat_creds: dict = {
             "api_key": self.jinachat_api_key
             and self.jinachat_api_key.get_secret_value(),
             "api_base": "https://api.chat.jina.ai/v1",
@@ -407,6 +348,6 @@ class JinaChat(BaseChatModel):
         return {**jinachat_creds, **self._default_params}
 
     @property
-    def _llm_type(self) -> str:
+    def _llm_type(self) -> Literal["jinachat"]:
         """Return type of chat model."""
         return "jinachat"
