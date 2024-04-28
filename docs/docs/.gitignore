@@ -1,7 +1,12 @@
-.yarn/
+#!/bin/bash
 
-node_modules/
+# List of directories and files to remove
+remove_list=(.yarn node_modules .cache-loader)
 
-.docusaurus
-.cache-loader
-docs/api
+# Iterate over the list and remove each item
+for item in "${remove_list[@]}"; do
+  rm -rf "$item"
+done
+
+# Navigate to the docs/api directory
+cd docs/api
