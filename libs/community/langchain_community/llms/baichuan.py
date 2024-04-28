@@ -14,7 +14,6 @@ from langchain_community.llms.utils import enforce_stop_tokens
 
 logger = logging.getLogger(__name__)
 
-
 class BaichuanLLM(LLM):
     # TODO: Adding streaming support.
     """Wrapper around Baichuan large language models."""
@@ -33,9 +32,10 @@ class BaichuanLLM(LLM):
 
     @root_validator()
     def validate_environment(cls, values: Dict) -> Dict:
-        values["baichuan_api_key"] = convert_to_secret_str(
+        api_key = convert_to_secret_str(
             get_from_dict_or_env(values, "baichuan_api_key", "BAICHUAN_API_KEY")
         )
+        values["baichuan_api_key"] = api_key
         values["baichuan_api_host"] = get_from_dict_or_env(
             values,
             "baichuan_api_host",
@@ -61,35 +61,4 @@ class BaichuanLLM(LLM):
         try:
             response = requests.post(
                 self.baichuan_api_host,  # type: ignore[arg-type]
-                headers=headers,
-                json=request,
-                timeout=self.timeout,
-            )
-
-            if response.status_code == 200:
-                parsed_json = json.loads(response.text)
-                return parsed_json["choices"][0]["message"]["content"]
-            else:
-                response.raise_for_status()
-        except Exception as e:
-            raise ValueError(f"An error has occurred: {e}")
-
-    def _call(
-        self,
-        prompt: str,
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> str:
-        request = self._default_params
-        request["messages"] = [{"role": "user", "content": prompt}]
-        request.update(kwargs)
-        text = self._post(request)
-        if stop is not None:
-            text = enforce_stop_tokens(text, stop)
-        return text
-
-    @property
-    def _llm_type(self) -> str:
-        """Return type of chat_model."""
-        return "baichuan-llm"
+              
