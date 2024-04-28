@@ -77,8 +77,6 @@ def _convert_delta_to_message_chunk(
         return default_class(content=content)
 
 
-# signature generation
-# https://cloud.tencent.com/document/product/1729/97732#532252ce-e960-48a7-8821-940a9ce2ccf3
 def _signature(secret_key: SecretStr, url: str, payload: Dict[str, Any]) -> str:
     sorted_keys = sorted(payload.keys())
 
@@ -138,26 +136,44 @@ class ChatHunyuan(BaseChatModel):
 
     hunyuan_api_base: str = Field(default=DEFAULT_API_BASE)
     """Hunyuan custom endpoints"""
-    hunyuan_app_id: Optional[int] = None
-    """Hunyuan App ID"""
-    hunyuan_secret_id: Optional[str] = None
-    """Hunyuan Secret ID"""
-    hunyuan_secret_key: Optional[SecretStr] = None
-    """Hunyuan Secret Key"""
-    streaming: bool = False
-    """Whether to stream the results or not."""
-    request_timeout: int = 60
-    """Timeout for requests to Hunyuan API. Default is 60 seconds."""
+    hunyuan_app_id: Optional[int] = Field(
+        ...,
+        description="Hunyuan App ID",
+    )
+    hunyuan_secret_id: Optional[str] = Field(
+        ...,
+        description="Hunyuan Secret ID",
+    )
+    hunyuan_secret_key: Optional[SecretStr] = Field(
+        ...,
+        description="Hunyuan Secret Key",
+    )
+    streaming: bool = Field(
+        False,
+        description="Whether to stream the results or not.",
+    )
+    request_timeout: int = Field(
+        60,
+        description="Timeout for requests to Hunyuan API. Default is 60 seconds.",
+    )
 
-    query_id: Optional[str] = None
-    """Query id for troubleshooting"""
-    temperature: float = 1.0
-    """What sampling temperature to use."""
-    top_p: float = 1.0
-    """What probability mass to use."""
+    query_id: Optional[str] = Field(
+        None,
+        description="Query id for troubleshooting",
+    )
+    temperature: float = Field(
+        1.0,
+        description="What sampling temperature to use.",
+    )
+    top_p: float = Field(
+        1.0,
+        description="What probability mass to use.",
+    )
 
-    model_kwargs: Dict[str, Any] = Field(default_factory=dict)
-    """Holds any model parameters valid for API call not explicitly specified."""
+    model_kwargs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Holds any model parameters valid for API call not explicitly specified.",
+    )
 
     class Config:
         """Configuration for this pydantic object."""
