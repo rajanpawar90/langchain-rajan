@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Mapping, Optional, cast
+from typing import Any, Dict, List, Mapping, Optional
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -18,20 +18,16 @@ from langchain_core.outputs import (
     ChatGeneration,
     ChatResult,
 )
-from langchain_core.pydantic_v1 import BaseModel, Extra, SecretStr
+from langchain_core.pydantic_v1 import BaseModel, Extra
 
 logger = logging.getLogger(__name__)
 
-
-# Ignoring type because below is valid pydantic code
-# Unexpected keyword argument "extra" for "__init_subclass__" of "object"  [call-arg]
 class ChatParams(BaseModel, extra=Extra.allow):
     """Parameters for the `Javelin AI Gateway` LLM."""
 
     temperature: float = 0.0
     stop: Optional[List[str]] = None
     max_tokens: Optional[int] = None
-
 
 class ChatJavelinAIGateway(BaseChatModel):
     """`Javelin AI Gateway` chat models API.
@@ -54,38 +50,28 @@ class ChatJavelinAIGateway(BaseChatModel):
     """
 
     route: str
-    """The route to use for the Javelin AI Gateway API."""
-
-    gateway_uri: Optional[str] = None
-    """The URI for the Javelin AI Gateway API."""
-
-    params: Optional[ChatParams] = None
-    """Parameters for the Javelin AI Gateway LLM."""
-
+    gateway_uri: Optional[str]
+    params: Optional[ChatParams]
+    javelin_api_key: Optional[SecretStr]
     client: Any
-    """javelin client."""
 
-    javelin_api_key: Optional[SecretStr] = None
-    """The API key for the Javelin AI Gateway."""
-
-    def __init__(self, **kwargs: Any):
+    def __init__(self, **data: Any):
         try:
-            from javelin_sdk import (
-                JavelinClient,
-                UnauthorizedError,
-            )
+            import javelin_sdk
+            from javelin_sdk import JavelinClient, UnauthorizedError
         except ImportError:
             raise ImportError(
                 "Could not import javelin_sdk python package. "
                 "Please install it with `pip install javelin_sdk`."
             )
 
-        super().__init__(**kwargs)
+        super().__init__(**data)
+
         if self.gateway_uri:
             try:
                 self.client = JavelinClient(
                     base_url=self.gateway_uri,
-                    api_key=cast(SecretStr, self.javelin_api_key).get_secret_value(),
+                    api_key=self.javelin_api_key.get_secret_value() if self.javelin_api_key else None,
                 )
             except UnauthorizedError as e:
                 raise ValueError("Javelin: Incorrect API Key.") from e
@@ -94,7 +80,7 @@ class ChatJavelinAIGateway(BaseChatModel):
     def _default_params(self) -> Dict[str, Any]:
         params: Dict[str, Any] = {
             "gateway_uri": self.gateway_uri,
-            "javelin_api_key": cast(SecretStr, self.javelin_api_key).get_secret_value(),
+            "javelin_api_key": self.javelin_api_key.get_secret_value() if self.javelin_api_key else None,
             "route": self.route,
             **(self.params.dict() if self.params else {}),
         }
@@ -107,18 +93,15 @@ class ChatJavelinAIGateway(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        message_dicts = [
-            ChatJavelinAIGateway._convert_message_to_dict(message)
-            for message in messages
-        ]
-        data: Dict[str, Any] = {
-            "messages": message_dicts,
+
+        data = {
+            "messages": [self._convert_message_to_dict(message) for message in messages],
             **(self.params.dict() if self.params else {}),
         }
 
-        resp = self.client.query_route(self.route, query_body=data)
+        response = self.client.query_route(self.route, query_body=data)
 
-        return ChatJavelinAIGateway._create_chat_result(resp.dict())
+        return self._create_chat_result(response)
 
     async def _agenerate(
         self,
@@ -127,18 +110,15 @@ class ChatJavelinAIGateway(BaseChatModel):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        message_dicts = [
-            ChatJavelinAIGateway._convert_message_to_dict(message)
-            for message in messages
-        ]
-        data: Dict[str, Any] = {
-            "messages": message_dicts,
+
+        data = {
+            "messages": [self._convert_message_to_dict(message) for message in messages],
             **(self.params.dict() if self.params else {}),
         }
 
-        resp = await self.client.aquery_route(self.route, query_body=data)
+        response = await self.client.aquery_route(self.route, query_body=data)
 
-        return ChatJavelinAIGateway._create_chat_result(resp.dict())
+        return self._create_chat_result(response)
 
     @property
     def _identifying_params(self) -> Dict[str, Any]:
@@ -159,9 +139,10 @@ class ChatJavelinAIGateway(BaseChatModel):
         return "javelin-ai-gateway-chat"
 
     @staticmethod
-    def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
-        role = _dict["role"]
-        content = _dict["content"]
+    def _convert_dict_to_message(d: Mapping[str, Any]) -> BaseMessage:
+        role = d["role"]
+        content = d["content"]
+
         if role == "user":
             return HumanMessage(content=content)
         elif role == "assistant":
@@ -170,13 +151,6 @@ class ChatJavelinAIGateway(BaseChatModel):
             return SystemMessage(content=content)
         else:
             return ChatMessage(content=content, role=role)
-
-    @staticmethod
-    def _raise_functions_not_supported() -> None:
-        raise ValueError(
-            "Function messages are not supported by the Javelin AI Gateway. Please"
-            " create a feature request at https://docs.getjavelin.io"
-        )
 
     @staticmethod
     def _convert_message_to_dict(message: BaseMessage) -> dict:
@@ -188,31 +162,28 @@ class ChatJavelinAIGateway(BaseChatModel):
             message_dict = {"role": "assistant", "content": message.content}
         elif isinstance(message, SystemMessage):
             message_dict = {"role": "system", "content": message.content}
-        elif isinstance(message, FunctionMessage):
-            raise ValueError(
-                "Function messages are not supported by the Javelin AI Gateway. Please"
-                " create a feature request at https://docs.getjavelin.io"
-            )
         else:
             raise ValueError(f"Got unknown message type: {message}")
 
         if "function_call" in message.additional_kwargs:
-            ChatJavelinAIGateway._raise_functions_not_supported()
+            raise ValueError(
+                "Function messages are not supported by the Javelin AI Gateway. Please"
+                " create a feature request at https://docs.getjavelin.io"
+            )
+
         if message.additional_kwargs:
             logger.warning(
                 "Additional message arguments are unsupported by Javelin AI Gateway "
                 " and will be ignored: %s",
                 message.additional_kwargs,
             )
+
         return message_dict
 
-    @staticmethod
-    def _create_chat_result(response: Mapping[str, Any]) -> ChatResult:
+    def _create_chat_result(self, response: Mapping[str, Any]) -> ChatResult:
         generations = []
         for candidate in response["llm_response"]["choices"]:
-            message = ChatJavelinAIGateway._convert_dict_to_message(
-                candidate["message"]
-            )
+            message = self._convert_dict_to_message(candidate["message"])
             message_metadata = candidate.get("metadata", {})
             gen = ChatGeneration(
                 message=message,
