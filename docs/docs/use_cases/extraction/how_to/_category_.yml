@@ -1,2 +1,6 @@
-label: 'How-To Guides'
-position: 1
+{
+  "data": {
+    "label": "How-To Guides",
+    "position": 1
+  }
+}
