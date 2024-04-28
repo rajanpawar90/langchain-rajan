@@ -1,9 +1,8 @@
-from typing import Any, Dict, List, Optional
+import oracledb
+from typing import Any, Dict, List, Union
 
 from langchain_core.documents import Document
-
 from langchain_community.document_loaders.base import BaseLoader
-
 
 class OracleAutonomousDatabaseLoader(BaseLoader):
     """
@@ -23,14 +22,13 @@ class OracleAutonomousDatabaseLoader(BaseLoader):
         query: str,
         user: str,
         password: str,
-        *,
-        schema: Optional[str] = None,
-        tns_name: Optional[str] = None,
-        config_dir: Optional[str] = None,
-        wallet_location: Optional[str] = None,
-        wallet_password: Optional[str] = None,
-        connection_string: Optional[str] = None,
-        metadata: Optional[List[str]] = None,
+        schema: Union[str, None] = None,
+        tns_name: Union[str, None] = None,
+        config_dir: Union[str, None] = None,
+        wallet_location: Union[str, None] = None,
+        wallet_password: Union[str, None] = None,
+        connection_string: Union[str, None] = None,
+        metadata: Union[List[str], None] = None,
     ):
         """
         init method
@@ -45,64 +43,68 @@ class OracleAutonomousDatabaseLoader(BaseLoader):
         :param connection_string: connection string to connect to adb instance
         :param metadata: metadata used in document
         """
-        # Mandatory required arguments.
+        self._validate_arguments(query, user, password)
+
         self.query = query
         self.user = user
         self.password = password
-
-        # Schema
         self.schema = schema
-
-        # TNS connection Method
         self.tns_name = tns_name
         self.config_dir = config_dir
-
-        # Wallet configuration is required for mTLS connection
         self.wallet_location = wallet_location
         self.wallet_password = wallet_password
-
-        # Connection String connection method
         self.connection_string = connection_string
-
-        # metadata column
         self.metadata = metadata
 
-        # dsn
-        self.dsn: Optional[str]
+        self.dsn: Union[str, None]
         self._set_dsn()
+
+    def _validate_arguments(self, query: str, user: str, password: str) -> None:
+        if not query or not user or not password:
+            raise ValueError("query, user, and password cannot be None or empty")
 
     def _set_dsn(self) -> None:
         if self.connection_string:
             self.dsn = self.connection_string
         elif self.tns_name:
             self.dsn = self.tns_name
+        else:
+            self.dsn = None
 
-    def _run_query(self) -> List[Dict[str, Any]]:
-        try:
-            import oracledb
-        except ImportError as e:
-            raise ImportError(
-                "Could not import oracledb, "
-                "please install with 'pip install oracledb'"
-            ) from e
-        connect_param = {"user": self.user, "password": self.password, "dsn": self.dsn}
+    def _get_connection_details(self) -> dict[str, str]:
+        connect_param = {
+            "user": self.user,
+            "password": self.password,
+            "dsn": self.dsn,
+        }
+
         if self.dsn == self.tns_name:
             connect_param["config_dir"] = self.config_dir
+
         if self.wallet_location and self.wallet_password:
             connect_param["wallet_location"] = self.wallet_location
             connect_param["wallet_password"] = self.wallet_password
 
+        return connect_param
+
+    def _run_query(self) -> List[Dict[str, Any]]:
         try:
-            connection = oracledb.connect(**connect_param)
+            connection_details = self._get_connection_details()
+            connection = oracledb.connect(**connection_details)
             cursor = connection.cursor()
+
             if self.schema:
                 cursor.execute(f"alter session set current_schema={self.schema}")
             cursor.execute(self.query)
+
             columns = [col[0] for col in cursor.description]
             data = cursor.fetchall()
             data = [dict(zip(columns, row)) for row in data]
+
         except oracledb.DatabaseError as e:
-            print("Got error while connecting: " + str(e))  # noqa: T201
+            import logging
+
+            logging.error(f"Got error while connecting: {str(e)}")
             data = []
         finally:
             cursor.close()
@@ -114,6 +116,7 @@ class OracleAutonomousDatabaseLoader(BaseLoader):
         data = self._run_query()
         documents = []
         metadata_columns = self.metadata if self.metadata else []
+
         for row in data:
             metadata = {
                 key: value for key, value in row.items() if key in metadata_columns
@@ -122,3 +125,18 @@ class OracleAutonomousDatabaseLoader(BaseLoader):
             documents.append(doc)
 
         return documents
+
+    def __repr__(self) -> str:
+        return (
+            f"OracleAutonomousDatabaseLoader("
+            f"query={self.query!r}, "
+            f"user={self.user!r}, "
+            f"password={self.password!r}, "
+            f"schema={self.schema!r}, "
+            f"tns_name={self.tns_name!r}, "
+            f"config_dir={self.config_dir!r}, "
+            f"wallet_location={self.wallet_location!r}, "
+            f"wallet_password={self.wallet_password!r}, "
+            f"connection_string={self.connection_string!r}, "
+            f"metadata={self.metadata!r})"
+        )
