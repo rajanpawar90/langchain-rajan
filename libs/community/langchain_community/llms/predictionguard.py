@@ -3,15 +3,14 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
-from langchain_core.pydantic_v1 import Extra, root_validator
+from langchain_core.pydantic_v1 import BaseModel, Extra, root_validator
 from langchain_core.utils import get_from_dict_or_env
 
 from langchain_community.llms.utils import enforce_stop_tokens
 
 logger = logging.getLogger(__name__)
 
-
-class PredictionGuard(LLM):
+class PredictionGuardLLM(LLM, BaseModel):
     """Prediction Guard large language models.
 
     To use, you should have the ``predictionguard`` python package installed, and the
@@ -23,35 +22,30 @@ class PredictionGuard(LLM):
     Example:
         .. code-block:: python
 
-            pgllm = PredictionGuard(model="MPT-7B-Instruct",
+            pgllm = PredictionGuardLLM(model="MPT-7B-Instruct",
                                     token="my-access-token",
                                     output={
                                         "type": "boolean"
                                     })
     """
 
-    client: Any  #: :meta private:
+    client: Any
     model: Optional[str] = "MPT-7B-Instruct"
-    """Model name to use."""
-
     output: Optional[Dict[str, Any]] = None
-    """The output type or structure for controlling the LLM output."""
-
     max_tokens: int = 256
-    """Denotes the number of tokens to predict per generation."""
-
     temperature: float = 0.75
-    """A non-negative float that tunes the degree of randomness in generation."""
-
     token: Optional[str] = None
-    """Your Prediction Guard access token."""
-
     stop: Optional[List[str]] = None
 
     class Config:
         """Configuration for this pydantic object."""
 
         extra = Extra.forbid
+
+    def __init__(self, **data: Any):
+        """Initialize the PredictionGuardLLM object."""
+        self.validate_environment(data)
+        super().__init__(**data)
 
     @root_validator()
     def validate_environment(cls, values: Dict) -> Dict:
@@ -102,29 +96,12 @@ class PredictionGuard(LLM):
             .. code-block:: python
                 response = pgllm("Tell me a joke.")
         """
-        import predictionguard as pg
-
         params = self._default_params
-        if self.stop is not None and stop is not None:
-            raise ValueError("`stop` found in both the input and default params.")
-        elif self.stop is not None:
-            params["stop_sequences"] = self.stop
-        else:
+        if stop is not None:
             params["stop_sequences"] = stop
 
-        response = pg.Completion.create(
-            model=self.model,
-            prompt=prompt,
-            output=self.output,
-            temperature=params["temperature"],
-            max_tokens=params["max_tokens"],
-            **kwargs,
-        )
-        text = response["choices"][0]["text"]
+        if self.stop is not None:
+            params["stop_sequences"] = self.stop
 
-        # If stop tokens are provided, Prediction Guard's endpoint returns them.
-        # In order to make this consistent with other endpoints, we strip them.
-        if stop is not None or self.stop is not None:
-            text = enforce_stop_tokens(text, params["stop_sequences"])
-
-        return text
+        if run_manager is not None:
+            run_manager.on_llm_start(llm=self, prom
