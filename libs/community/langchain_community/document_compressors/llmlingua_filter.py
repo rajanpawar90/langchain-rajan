@@ -3,12 +3,11 @@
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import pydantic
 from langchain_core.callbacks import Callbacks
 from langchain_core.documents import Document
-from langchain_core.documents.compressor import (
-    BaseDocumentCompressor,
-)
-from langchain_core.pydantic_v1 import root_validator
+from langchain_core.documents.compressor import BaseDocumentCompressor
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 DEFAULT_LLM_LINGUA_INSTRUCTION = (
     "Given this documents, please answer the final question"
@@ -22,25 +21,13 @@ class LLMLinguaCompressor(BaseDocumentCompressor):
     https://github.com/microsoft/LLMLingua
     """
 
-    # Pattern to match ref tags at the beginning or end of the string,
-    # allowing for malformed tags
-    _pattern_beginning = re.compile(r"\A(?:<#)?(?:ref)?(\d+)(?:#>?)?")
-    _pattern_ending = re.compile(r"(?:<#)?(?:ref)?(\d+)(?:#>?)?\Z")
-
     model_name: str = "NousResearch/Llama-2-7b-hf"
-    """The hugging face model to use"""
     device_map: str = "cuda"
-    """The device to use for llm lingua"""
     target_token: int = 300
-    """The target number of compressed tokens"""
     rank_method: str = "longllmlingua"
-    """The ranking method to use"""
     model_config: dict = {}
-    """Custom configuration for the model"""
     open_api_config: dict = {}
-    """open_api configuration"""
     instruction: str = DEFAULT_LLM_LINGUA_INSTRUCTION
-    """The instruction for the LLM"""
     additional_compress_kwargs: dict = {
         "condition_compare": True,
         "condition_in_question": "after",
@@ -48,11 +35,11 @@ class LLMLinguaCompressor(BaseDocumentCompressor):
         "reorder_context": "sort",
         "dynamic_context_compression_ratio": 0.4,
     }
-    """Extra compression arguments"""
-    lingua: Any
-    """The instance of the llm linqua"""
 
-    @root_validator(pre=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device_map)
+
+    @pydantic.root_validator(pre=True)
     def validate_environment(cls, values: Dict) -> Dict:
         """Validate that the python package exists in environment."""
         try:
@@ -61,13 +48,6 @@ class LLMLinguaCompressor(BaseDocumentCompressor):
             raise ImportError(
                 "Could not import llmlingua python package. "
                 "Please install it with `pip install llmlingua`."
-            )
-        if not values.get("lingua"):
-            values["lingua"] = PromptCompressor(
-                model_name=values.get("model_name", {}),
-                device_map=values.get("device_map", {}),
-                model_config=values.get("model_config", {}),
-                open_api_config=values.get("open_api_config", {}),
             )
         return values
 
@@ -159,17 +139,19 @@ class LLMLinguaCompressor(BaseDocumentCompressor):
         if len(documents) == 0:  # to avoid empty api call
             return []
 
-        compressed_prompt = self.lingua.compress_prompt(
-            context=self._format_context(documents),
-            instruction=self.instruction,
-            question=query,
-            target_token=self.target_token,
-            rank_method=self.rank_method,
-            concate_question=False,
-            add_instruction=True,
+        input_sequences = []
+        for doc in self._format_context(documents):
+            input_sequences.append(self.tokenizer.encode(doc, return_tensors="pt").to(self.device_map))
+
+        compressed_prompt = self.model.generate(
+            input_sequences,
+            max_length=self.target_token,
+            num_beams=5,
+            early_stopping=True,
             **self.additional_compress_kwargs,
         )
-        compreseed_context = compressed_prompt["compressed_prompt"].split("\n\n")[1:]
+
+        compressed_context = self.tokenizer.decode(compressed_prompt[0]).split("\n\n")[1:]
 
         extracted_metadata = self.extract_ref_id_tuples_and_clean(compreseed_context)
 
