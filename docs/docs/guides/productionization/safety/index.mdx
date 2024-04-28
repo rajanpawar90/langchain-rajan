@@ -1,11 +1,24 @@
 # Privacy & Safety
 
-One of the key concerns with using LLMs is that they may misuse private data or generate harmful or unethical text. This is an area of active research in the field. Here we present some built-in chains inspired by this research, which are intended to make the outputs of LLMs safer.
+Several key concerns with using large language models (LLMs) involve the potential for misuse of private data and the generation of harmful or unethical text. This is an active area of research in the field. Here, we present some built-in chains inspired by this research, which are intended to make the outputs of LLMs safer:
 
-- [Amazon Comprehend moderation chain](/docs/guides/productionization/safety/amazon_comprehend_chain): Use [Amazon Comprehend](https://aws.amazon.com/comprehend/) to detect and handle Personally Identifiable Information (PII) and toxicity.
-- [Constitutional chain](/docs/guides/productionization/safety/constitutional_chain): Prompt the model with a set of principles which should guide the model behavior.
-- [Hugging Face prompt injection identification](/docs/guides/productionization/safety/hugging_face_prompt_injection): Detect and handle prompt injection attacks. 
-- [Layerup Security](/docs/guides/productionization/safety/layerup_security): Easily mask PII & sensitive data, detect and mitigate 10+ LLM-based threat vectors, including PII & sensitive data, prompt injection, hallucination, abuse, and more.
-- [Logical Fallacy chain](/docs/guides/productionization/safety/logical_fallacy_chain): Checks the model output against logical fallacies to correct any deviation.
-- [Moderation chain](/docs/guides/productionization/safety/moderation): Check if any output text is harmful and flag it.
-- [Presidio data anonymization](/docs/guides/productionization/safety/presidio_data_anonymization): Helps to ensure sensitive data is properly managed and governed.
+1. [Amazon Comprehend Moderation Chain](/docs/guides/productionization/safety/amazon_comprehend_chain):
+   - Utilizes [Amazon Comprehend](https://aws.amazon.com/comprehend/) to detect and handle Personally Identifiable Information (PII) and toxicity.
+
+2. [Constitutional Chain](/docs/guides/productionization/safety/constitutional_chain):
+   - Prompts the model with a set of principles that should guide the model's behavior.
+
+3. [Hugging Face Prompt Injection Identification](/docs/guides/productionization/safety/hugging_face_prompt_injection):
+   - Detects and handles prompt injection attacks.
+
+4. [Layerup Security](/docs/guides/productionization/safety/layerup_security):
+   - Easily masks PII & sensitive data, detects, and mitigates 10+ LLM-based threat vectors, including PII & sensitive data, prompt injection, hallucination, abuse, and more.
+
+5. [Logical Fallacy Chain](/docs/guides/productionization/safety/logical_fallacy_chain):
+   - Checks the model output against logical fallacies to correct any deviation.
+
+6. [Moderation Chain](/docs/guides/productionization/safety/moderation):
+   - Checks if any output text is harmful and flags it.
+
+7. [Presidio Data Anonymization](/docs/guides/productionization/safety/presidio_data_anonymization):
+   - Helps ensure sensitive data is properly managed and governed.
