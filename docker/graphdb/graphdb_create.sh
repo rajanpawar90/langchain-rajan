@@ -1,28 +1,30 @@
 #! /bin/bash
+
 REPOSITORY_ID="langchain"
 GRAPHDB_URI="http://localhost:7200/"
+GRAPHDB_BIN="/opt/graphdb/dist/bin/graphdb"
 
 echo -e "\nUsing GraphDB: ${GRAPHDB_URI}"
 
-function startGraphDB {
- echo -e "\nStarting GraphDB..."
- exec /opt/graphdb/dist/bin/graphdb
+start_graphdb() {
+  echo -e "\nStarting GraphDB..."
+  $GRAPHDB_BIN &
 }
 
-function waitGraphDBStart {
+check_graphdb_status() {
   echo -e "\nWaiting GraphDB to start..."
-  for _ in $(seq 1 5); do
-    CHECK_RES=$(curl --silent --write-out '%{http_code}' --output /dev/null ${GRAPHDB_URI}/rest/repositories)
-    if [ "${CHECK_RES}" = '200' ]; then
-        echo -e "\nUp and running"
-        break
+  for i in {1..30}; do
+    curl --silent --output /dev/null --fail --head --write-out '%{http_code}' ${GRAPHDB_URI}/rest/repositories || continue
+    if [ "$(curl --silent --output /dev/null --head --write-out '%{http_code}' ${GRAPHDB_URI}/rest/repositories)" = '200' ]; then
+      echo -e "\nUp and running"
+      return
     fi
-    sleep 30s
-    echo "CHECK_RES: ${CHECK_RES}"
+    sleep 1
   done
+  echo "GraphDB failed to start within the allotted time"
+  exit 1
 }
 
-
-startGraphDB &
-waitGraphDBStart
+start_graphdb
+check_graphdb_status
 wait
