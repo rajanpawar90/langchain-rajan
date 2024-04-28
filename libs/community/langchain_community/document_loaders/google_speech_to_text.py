@@ -1,23 +1,29 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+import os
+import reprlib
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from google.api_core.client_options import ClientOptions
+from google.cloud import speech_v2 as google_speech
+from google.protobuf import field_mask_pb2
 from langchain_core._api.deprecation import deprecated
 from langchain_core.documents import Document
-
 from langchain_community.document_loaders.base import BaseLoader
 from langchain_community.utilities.vertexai import get_client_info
 
 if TYPE_CHECKING:
-    from google.cloud.speech_v2 import RecognitionConfig
+    from google.cloud.speech_v2 import (
+        AutoDetectDecodingConfig,
+        RecognitionConfig,
+        RecognitionFeatures,
+        RecognizeRequest,
+        SpeechClient,
+        SpeechRecognitionAlternative,
+        SpeechRecognitionResult,
+    )
     from google.protobuf.field_mask_pb2 import FieldMask
 
-
-@deprecated(
-    since="0.0.32",
-    removal="0.2.0",
-    alternative_import="langchain_google_community.SpeechToTextLoader",
-)
 class GoogleSpeechToTextLoader(BaseLoader):
     """
     Loader for Google Cloud Speech-to-Text audio transcripts.
@@ -34,6 +40,8 @@ class GoogleSpeechToTextLoader(BaseLoader):
     documentation.
     https://cloud.google.com/speech-to-text
     """
+
+    __version__ = "0.0.32"
 
     def __init__(
         self,
@@ -61,25 +69,10 @@ class GoogleSpeechToTextLoader(BaseLoader):
                 For more information:
                 https://cloud.google.com/python/docs/reference/speech/latest/google.cloud.speech_v2.types.RecognizeRequest
         """
-        try:
-            from google.api_core.client_options import ClientOptions
-            from google.cloud.speech_v2 import (
-                AutoDetectDecodingConfig,
-                RecognitionConfig,
-                RecognitionFeatures,
-                SpeechClient,
-            )
-        except ImportError as exc:
-            raise ImportError(
-                "Could not import google-cloud-speech python package. "
-                "Please install it with `pip install google-cloud-speech`."
-            ) from exc
-
         self.project_id = project_id
         self.file_path = file_path
         self.location = location
         self.recognizer_id = recognizer_id
-        # Config must be set in speech recognition request.
         self.config = config or RecognitionConfig(
             auto_decoding_config=AutoDetectDecodingConfig(),
             language_codes=["en-US"],
@@ -103,20 +96,49 @@ class GoogleSpeechToTextLoader(BaseLoader):
             project_id, location, recognizer_id
         )
 
-    def load(self) -> List[Document]:
-        """Transcribes the audio file and loads the transcript into documents.
-
-        It uses the Google Cloud Speech-to-Text API to transcribe the audio file
-        and blocks until the transcription is finished.
+    def __repr__(self) -> str:
         """
-        try:
-            from google.cloud.speech_v2 import RecognizeRequest
-        except ImportError as exc:
-            raise ImportError(
-                "Could not import google-cloud-speech python package. "
-                "Please install it with `pip install google-cloud-speech`."
-            ) from exc
+        Returns a string representation of the class.
+        """
+        return (
+            f"{self.__class__.__name__}("
+            f"project_id={self.project_id!r}, "
+            f"file_path={self.file_path!r}, "
+            f"location={self.location!r}, "
+            f"recognizer_id={self.recognizer_id!r}, "
+            f"config={self.config!r}, "
+            f"config_mask={self.config_mask!r})"
+        )
 
+    def _validate_inputs(self) -> None:
+        """
+        Validates the inputs.
+        """
+        if not isinstance(self.project_id, str):
+            raise ValueError("`project_id` must be a string.")
+
+        if not isinstance(self.file_path, str):
+            raise ValueError("`file_path` must be a string.")
+
+        if not isinstance(self.location, str):
+            raise ValueError("`location` must be a string.")
+
+        if not isinstance(self.recognizer_id, str):
+            raise ValueError("`recognizer_id` must be a string.")
+
+        if self.config is not None and not isinstance(self.config, RecognitionConfig):
+            raise ValueError("`config` must be a RecognitionConfig object.")
+
+        if self.config_mask is not None and not isinstance(self.config_mask, FieldMask):
+            raise ValueError("`config_mask` must be a FieldMask object.")
+
+    def _transcribe_audio(self) -> List[SpeechRecognitionResult]:
+        """
+        Transcribes the audio file.
+
+        Returns:
+            A list of SpeechRecognitionResult objects.
+        """
         request = RecognizeRequest(
             recognizer=self._recognizer_path,
             config=self.config,
@@ -131,13 +153,49 @@ class GoogleSpeechToTextLoader(BaseLoader):
 
         response = self._client.recognize(request=request)
 
-        return [
-            Document(
-                page_content=result.alternatives[0].transcript,
+        return response.results
+
+    def _parse_response(self, results: List[SpeechRecognitionResult]) -> List[Document]:
+        """
+        Parses the response from the API.
+
+        Args:
+            results: A list of SpeechRecognitionResult objects.
+
+        Returns:
+            A list of Document objects.
+        """
+        documents = []
+
+        for result in results:
+            alternatives = result.alternatives
+            if not alternatives:
+                continue
+
+            document = Document(
+                page_content=alternatives[0].transcript,
                 metadata={
                     "language_code": result.language_code,
                     "result_end_offset": result.result_end_offset,
                 },
             )
-            for result in response.results
-        ]
+
+            documents.append(document)
+
+        return documents
+
+    def load(self) -> List[Document]:
+        """
+        Transcribes the audio file and loads the transcript into documents.
+
+        It uses the Google Cloud Speech-to-Text API to transcribe the audio file
+        and blocks until the transcription is finished.
+
+        Returns:
+            A list of Document objects.
+        """
+        self._validate_inputs()
+
+        results = self._transcribe_audio()
+
+        return self._parse_response(results)
