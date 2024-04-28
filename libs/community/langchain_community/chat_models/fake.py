@@ -1,7 +1,9 @@
 """Fake ChatModel for testing purposes."""
+from __future__ import annotations
+
 import asyncio
 import time
-from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
+from typing import Any, AsyncIterator, Dict, Final, Iterable, List, Literal, Optional, Union
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -15,7 +17,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 class FakeMessagesListChatModel(BaseChatModel):
     """Fake ChatModel for testing purposes."""
 
-    responses: List[BaseMessage]
+    responses: Final[List[BaseMessage]]
     sleep: Optional[float] = None
     i: int = 0
 
@@ -35,19 +37,19 @@ class FakeMessagesListChatModel(BaseChatModel):
         return ChatResult(generations=[generation])
 
     @property
-    def _llm_type(self) -> str:
+    def _llm_type(self) -> Literal["fake-messages-list-chat-model"]:
         return "fake-messages-list-chat-model"
 
 
 class FakeListChatModel(SimpleChatModel):
     """Fake ChatModel for testing purposes."""
 
-    responses: List
+    responses: Final[List[str]]
     sleep: Optional[float] = None
     i: int = 0
 
     @property
-    def _llm_type(self) -> str:
+    def _llm_type(self) -> Literal["fake-list-chat-model"]:
         return "fake-list-chat-model"
 
     def _call(
@@ -71,7 +73,7 @@ class FakeListChatModel(SimpleChatModel):
         stop: Union[List[str], None] = None,
         run_manager: Union[CallbackManagerForLLMRun, None] = None,
         **kwargs: Any,
-    ) -> Iterator[ChatGenerationChunk]:
+    ) -> Iterable[ChatGenerationChunk]:
         response = self.responses[self.i]
         if self.i < len(self.responses) - 1:
             self.i += 1
@@ -82,9 +84,23 @@ class FakeListChatModel(SimpleChatModel):
                 time.sleep(self.sleep)
             yield ChatGenerationChunk(message=AIMessageChunk(content=c))
 
+    @overload
     async def _astream(
         self,
         messages: List[BaseMessage],
+        stop: Union[List[str], None] = None,
+        run_manager: Union[AsyncCallbackManagerForLLMRun, None] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        ...
+
+    @overload
+    async def _astream(self, **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
+        ...
+
+    async def _astream(
+        self,
+        messages: List[BaseMessage] = ...,
         stop: Union[List[str], None] = None,
         run_manager: Union[AsyncCallbackManagerForLLMRun, None] = None,
         **kwargs: Any,
@@ -102,3 +118,4 @@ class FakeListChatModel(SimpleChatModel):
     @property
     def _identifying_params(self) -> Dict[str, Any]:
         return {"responses": self.responses}
+
