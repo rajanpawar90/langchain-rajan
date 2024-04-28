@@ -1,15 +1,16 @@
 import logging
-from typing import Any, List, Mapping, Optional
+import os
+from functools import lru_cache
+from typing import Any, Dict, List, Literal, Mapping, Optional
 
+import transformers
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
 from langchain_core.pydantic_v1 import Extra
 
 DEFAULT_MODEL_ID = "gpt2"
 
-
 logger = logging.getLogger(__name__)
-
 
 class IpexLLM(LLM):
     """IpexLLM model.
@@ -23,11 +24,11 @@ class IpexLLM(LLM):
 
     model_id: str = DEFAULT_MODEL_ID
     """Model name or model path to use."""
-    model_kwargs: Optional[dict] = None
+    model_kwargs: Optional[Dict[str, Any]] = None
     """Keyword arguments passed to the model."""
-    model: Any  #: :meta private:
+    model: Any = None  #: :meta private:
     """IpexLLM model."""
-    tokenizer: Any  #: :meta private:
+    tokenizer: Any = None  #: :meta private:
     """Huggingface tokenizer model."""
     streaming: bool = True
     """Whether to stream the results, token by token."""
@@ -38,12 +39,18 @@ class IpexLLM(LLM):
         extra = Extra.forbid
 
     @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.model = None
+        cls.tokenizer = None
+
+    @classmethod
     def from_model_id(
         cls,
         model_id: str,
-        model_kwargs: Optional[dict] = None,
+        model_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
-    ) -> LLM:
+    ) -> "IpexLLM":
         """
         Construct object from model_id
 
@@ -61,27 +68,28 @@ class IpexLLM(LLM):
                 AutoModel,
                 AutoModelForCausalLM,
             )
-            from transformers import AutoTokenizer, LlamaTokenizer
-
         except ImportError:
-            raise ValueError(
-                "Could not import ipex-llm or transformers. "
-                "Please install it with `pip install --pre --upgrade ipex-llm[all]`."
-            )
+            if isinstance(os.geterror(), OSError):
+                raise ValueError(
+                    "Could not import ipex-llm or transformers. "
+                    "Please install it with `pip install --pre --upgrade ipex-llm[all]`."
+                )
+            else:
+                raise
 
         _model_kwargs = model_kwargs or {}
 
         try:
-            tokenizer = AutoTokenizer.from_pretrained(model_id, **_model_kwargs)
+            cls.tokenizer = AutoTokenizer.from_pretrained(model_id, **_model_kwargs)
         except Exception:
-            tokenizer = LlamaTokenizer.from_pretrained(model_id, **_model_kwargs)
+            cls.tokenizer = transformers.LlamaTokenizer.from_pretrained(model_id, **_model_kwargs)
 
         try:
-            model = AutoModelForCausalLM.from_pretrained(
+            cls.model = AutoModelForCausalLM.from_pretrained(
                 model_id, load_in_4bit=True, **_model_kwargs
             )
         except Exception:
-            model = AutoModel.from_pretrained(
+            cls.model = AutoModel.from_pretrained(
                 model_id, load_in_4bit=True, **_model_kwargs
             )
 
@@ -90,21 +98,26 @@ class IpexLLM(LLM):
                 k: v for k, v in _model_kwargs.items() if k != "trust_remote_code"
             }
 
-        return cls(
+        self = cls(
             model_id=model_id,
-            model=model,
-            tokenizer=tokenizer,
             model_kwargs=_model_kwargs,
             **kwargs,
         )
+        self._identifying_params.update(
+            {
+                "model_id": self.model_id,
+                "model_kwargs": self.model_kwargs,
+            }
+        )
+        return self
 
     @classmethod
     def from_model_id_low_bit(
         cls,
         model_id: str,
-        model_kwargs: Optional[dict] = None,
+        model_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
-    ) -> LLM:
+    ) -> "IpexLLM":
         """
         Construct low_bit object from model_id
 
@@ -122,37 +135,43 @@ class IpexLLM(LLM):
                 AutoModel,
                 AutoModelForCausalLM,
             )
-            from transformers import AutoTokenizer, LlamaTokenizer
-
         except ImportError:
-            raise ValueError(
-                "Could not import ipex-llm or transformers. "
-                "Please install it with `pip install --pre --upgrade ipex-llm[all]`."
-            )
+            if isinstance(os.geterror(), OSError):
+                raise ValueError(
+                    "Could not import ipex-llm or transformers. "
+                    "Please install it with `pip install --pre --upgrade ipex-llm[all]`."
+                )
+            else:
+                raise
 
         _model_kwargs = model_kwargs or {}
         try:
-            tokenizer = AutoTokenizer.from_pretrained(model_id, **_model_kwargs)
+            cls.tokenizer = AutoTokenizer.from_pretrained(model_id, **_model_kwargs)
         except Exception:
-            tokenizer = LlamaTokenizer.from_pretrained(model_id, **_model_kwargs)
+            cls.tokenizer = transformers.LlamaTokenizer.from_pretrained(model_id, **_model_kwargs)
 
         try:
-            model = AutoModelForCausalLM.load_low_bit(model_id, **_model_kwargs)
+            cls.model = AutoModelForCausalLM.load_low_bit(model_id, **_model_kwargs)
         except Exception:
-            model = AutoModel.load_low_bit(model_id, **_model_kwargs)
+            cls.model = AutoModel.load_low_bit(model_id, **_model_kwargs)
 
         if "trust_remote_code" in _model_kwargs:
             _model_kwargs = {
                 k: v for k, v in _model_kwargs.items() if k != "trust_remote_code"
             }
 
-        return cls(
+        self = cls(
             model_id=model_id,
-            model=model,
-            tokenizer=tokenizer,
             model_kwargs=_model_kwargs,
             **kwargs,
         )
+        self._identifying_params.update(
+            {
+                "model_id": self.model_id,
+                "model_kwargs": self.model_kwargs,
+            }
+        )
+        return self
 
     @property
     def _identifying_params(self) -> Mapping[str, Any]:
@@ -166,6 +185,7 @@ class IpexLLM(LLM):
     def _llm_type(self) -> str:
         return "ipex-llm"
 
+    @lru_cache(maxsize=None)
     def _call(
         self,
         prompt: str,
@@ -173,7 +193,7 @@ class IpexLLM(LLM):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> str:
-        if self.streaming:
+        if self.streaming is True:
             from transformers import TextStreamer
 
             input_ids = self.tokenizer.encode(prompt, return_tensors="pt")
