@@ -1,21 +1,22 @@
-# Dropbox
-
->[Dropbox](https://en.wikipedia.org/wiki/Dropbox) is a file hosting service that brings everything-traditional 
-> files, cloud content, and web shortcuts together in one place.
- 
-
-## Installation and Setup
-
-See the detailed [installation guide](/docs/integrations/document_loaders/dropbox#prerequisites).
-
-```bash
-pip install -U dropbox
-```
-
-## Document Loader
-
-See a [usage example](/docs/integrations/document_loaders/dropbox).
-
-```python
 from langchain_community.document_loaders import DropboxLoader
-```
+
+# Load a file from Dropbox
+loader = DropboxLoader('path/to/file.txt')
+documents = loader.load()
+
+# List files in a Dropbox folder
+loader = DropboxLoader('path/to/folder')
+documents = loader.load_and_split(split_documents=True)
+
+
+from langchain_community.document_loaders import DropboxLoader
+
+# Load a file from Dropbox
+loader = DropboxLoader('path/to/file.txt', app_key='your_app_key', app_secret='your_app_secret', access_token='your_access_token')
+documents = loader.load()
+
+# List files in a Dropbox folder
+loader = DropboxLoader('path/to/folder', app_key='your_app_key', app_secret='your_app_secret', access_token='your_access_token')
+documents = loader.load_and_split(split_documents=True)
+
+
