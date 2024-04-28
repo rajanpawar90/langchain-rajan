@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional
 
 import requests
 from langchain_core.callbacks import CallbackManagerForLLMRun
@@ -8,22 +8,17 @@ from langchain_core.utils import get_from_dict_or_env
 
 from langchain_community.llms.utils import enforce_stop_tokens
 
-INSTRUCTION_KEY = "### Instruction:"
-RESPONSE_KEY = "### Response:"
-INTRO_BLURB = (
+INSTRUCTION_KEY: str = "### Instruction:"
+RESPONSE_KEY: str = "### Response:"
+INTRO_BLURB: str = (
     "Below is an instruction that describes a task. "
     "Write a response that appropriately completes the request."
 )
-PROMPT_FOR_GENERATION_FORMAT = """{intro}
-{instruction_key}
+PROMPT_FOR_GENERATION_FORMAT: str = f"""{INTRO_BLURB}
+{INSTRUCTION_KEY}
 {instruction}
-{response_key}
-""".format(
-    intro=INTRO_BLURB,
-    instruction_key=INSTRUCTION_KEY,
-    instruction="{instruction}",
-    response_key=RESPONSE_KEY,
-)
+{RESPONSE_KEY}
+"""
 
 
 class MosaicML(LLM):
@@ -77,10 +72,7 @@ class MosaicML(LLM):
     def _identifying_params(self) -> Mapping[str, Any]:
         """Get the identifying parameters."""
         _model_kwargs = self.model_kwargs or {}
-        return {
-            **{"endpoint_url": self.endpoint_url},
-            **{"model_kwargs": _model_kwargs},
-        }
+        return {**{"endpoint_url": self.endpoint_url}, **{"model_kwargs": _model_kwargs}}
 
     @property
     def _llm_type(self) -> str:
@@ -117,6 +109,7 @@ class MosaicML(LLM):
 
                 response = mosaic_llm("Tell me a joke.")
         """
+        session = requests.Session()
         _model_kwargs = self.model_kwargs or {}
 
         prompt = self._transform_prompt(prompt)
@@ -133,54 +126,48 @@ class MosaicML(LLM):
 
         # send request
         try:
-            response = requests.post(self.endpoint_url, headers=headers, json=payload)
+            response = session.post(self.endpoint_url, headers=headers, json=payload)
         except requests.exceptions.RequestException as e:
-            raise ValueError(f"Error raised by inference endpoint: {e}")
+            raise ValueError(f"Error raised by inference endpoint: {e}") from e
 
         try:
-            if response.status_code == 429:
-                if not is_retry:
-                    import time
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 429 and not is_retry:
+                import time
 
-                    time.sleep(self.retry_sleep)
+                time.sleep(self.retry_sleep)
 
-                    return self._call(prompt, stop, run_manager, is_retry=True)
-
-                raise ValueError(
-                    f"Error raised by inference API: rate limit exceeded.\nResponse: "
-                    f"{response.text}"
-                )
-
-            parsed_response = response.json()
-
-            # The inference API has changed a couple of times, so we add some handling
-            # to be robust to multiple response formats.
-            if isinstance(parsed_response, dict):
-                output_keys = ["data", "output", "outputs"]
-                for key in output_keys:
-                    if key in parsed_response:
-                        output_item = parsed_response[key]
-                        break
-                else:
-                    raise ValueError(
-                        f"No valid key ({', '.join(output_keys)}) in response:"
-                        f" {parsed_response}"
-                    )
-                if isinstance(output_item, list):
-                    text = output_item[0]
-                else:
-                    text = output_item
-            else:
-                raise ValueError(f"Unexpected response type: {parsed_response}")
-
-            # Older versions of the API include the input in the output response
-            if text.startswith(prompt):
-                text = text[len(prompt) :]
-
-        except requests.exceptions.JSONDecodeError as e:
+                return self._call(prompt, stop, run_manager, is_retry=True)
             raise ValueError(
                 f"Error raised by inference API: {e}.\nResponse: {response.text}"
-            )
+            ) from e
+
+        parsed_response = response.json()
+
+        # The inference API has changed a couple of times, so we add some handling
+        # to be robust to multiple response formats.
+        if isinstance(parsed_response, dict):
+            output_keys = ["data", "output", "outputs"]
+            for key in output_keys:
+                if key in parsed_response:
+                    output_item = parsed_response[key]
+                    break
+            else:
+                raise ValueError(
+                    f"No valid key ({', '.join(output_keys)}) in response:"
+                    f" {parsed_response}"
+                )
+            if isinstance(output_item, list):
+                text = output_item[0]
+            else:
+                text = output_item
+        else:
+            raise ValueError(f"Unexpected response type: {parsed_response}")
+
+        # Older versions of the API include the input in the output response
+        if text.startswith(prompt):
+            text = text[len(prompt) :]
 
         # TODO: replace when MosaicML supports custom stop tokens natively
         if stop is not None:
