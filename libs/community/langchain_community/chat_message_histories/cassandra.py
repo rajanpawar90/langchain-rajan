@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 import typing
-import uuid
-from typing import List
+from typing import List, Optional
 
-if typing.TYPE_CHECKING:
-    from cassandra.cluster import Session
+import uuid
+from cassandra.cluster import Session
+from cassio.table import ClusteredCassandraTable
 
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import (
@@ -18,7 +18,6 @@ from langchain_core.messages import (
 
 DEFAULT_TABLE_NAME = "message_store"
 DEFAULT_TTL_SECONDS = None
-
 
 class CassandraChatMessageHistory(BaseChatMessageHistory):
     """Chat message history that stores history in Cassandra.
@@ -39,10 +38,17 @@ class CassandraChatMessageHistory(BaseChatMessageHistory):
         session: Session,
         keyspace: str,
         table_name: str = DEFAULT_TABLE_NAME,
-        ttl_seconds: typing.Optional[int] = DEFAULT_TTL_SECONDS,
+        ttl_seconds: Optional[int] = DEFAULT_TTL_SECONDS,
     ) -> None:
         try:
-            from cassio.table import ClusteredCassandraTable
+            self.table = ClusteredCassandraTable(
+                session=session,
+                keyspace=keyspace,
+                table=table_name,
+                ttl_seconds=ttl_seconds,
+                primary_key_type=["TEXT", "TIMEUUID"],
+                ordering_in_partition="DESC",
+            )
         except (ImportError, ModuleNotFoundError):
             raise ImportError(
                 "Could not import cassio python package. "
@@ -50,26 +56,21 @@ class CassandraChatMessageHistory(BaseChatMessageHistory):
             )
         self.session_id = session_id
         self.ttl_seconds = ttl_seconds
-        self.table = ClusteredCassandraTable(
-            session=session,
-            keyspace=keyspace,
-            table=table_name,
-            ttl_seconds=ttl_seconds,
-            primary_key_type=["TEXT", "TIMEUUID"],
-            ordering_in_partition="DESC",
-        )
 
     @property
     def messages(self) -> List[BaseMessage]:  # type: ignore
         """Retrieve all session messages from DB"""
         # The latest are returned, in chronological order
         message_blobs = [
-            row["body_blob"]
+            row["body_blob"].decode("utf-8")  # Decode bytes to string
             for row in self.table.get_partition(
                 partition_id=self.session_id,
             )
         ][::-1]
-        items = [json.loads(message_blob) for message_blob in message_blobs]
+        try:
+            items = [json.loads(message_blob) for message_blob in message_blobs]
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}")
         messages = messages_from_dict(items)
         return messages
 
@@ -79,10 +80,10 @@ class CassandraChatMessageHistory(BaseChatMessageHistory):
         self.table.put(
             partition_id=self.session_id,
             row_id=this_row_id,
-            body_blob=json.dumps(message_to_dict(message)),
+            body_blob=json.dumps(message_to_dict(message)).encode("utf-8"),  # Encode string to bytes
             ttl_seconds=self.ttl_seconds,
         )
 
-    def clear(self) -> None:
+    def clear(self, session_id: str) -> None:
         """Clear session memory from DB"""
-        self.table.delete_partition(self.session_id)
+        self.table.delete_partition(session_id)
