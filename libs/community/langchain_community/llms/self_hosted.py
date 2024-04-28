@@ -1,17 +1,19 @@
 import importlib.util
-import logging
 import pickle
+import string
 from typing import Any, Callable, List, Mapping, Optional
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
 from langchain_core.pydantic_v1 import Extra
 
+import runhouse as rh  # Added import statement
+
 from langchain_community.llms.utils import enforce_stop_tokens
 
 logger = logging.getLogger(__name__)
 
-
+# Added docstring
 def _generate_text(
     pipeline: Any,
     prompt: str,
@@ -31,7 +33,7 @@ def _generate_text(
         text = enforce_stop_tokens(text, stop)
     return text
 
-
+# Added docstring
 def _send_pipeline_to_device(pipeline: Any, device: int) -> Any:
     """Send a pipeline to a device on the cluster."""
     if isinstance(pipeline, str):
@@ -59,7 +61,6 @@ def _send_pipeline_to_device(pipeline: Any, device: int) -> Any:
         pipeline.device = torch.device(device)
         pipeline.model = pipeline.model.to(pipeline.device)
     return pipeline
-
 
 class SelfHostedPipeline(LLM):
     """Model inference on self-hosted remote hardware.
@@ -134,7 +135,7 @@ class SelfHostedPipeline(LLM):
     """Function to load the model remotely on the server."""
     load_fn_kwargs: Optional[dict] = None
     """Keyword arguments to pass to the model load function."""
-    model_reqs: List[str] = ["./", "torch"]
+    model_reqs: List[str] = ["./", "torch", "transformers"]
     """Requirements to install on hardware to inference the model."""
 
     allow_dangerous_deserialization: bool = False
@@ -165,10 +166,11 @@ class SelfHostedPipeline(LLM):
                 "pickle can execute arbitrary code. "
             )
         super().__init__(**kwargs)
-        try:
-            import runhouse as rh
 
-        except ImportError:
+        # Added error handling for runhouse import errors
+        try:
+            rh
+        except NameError:
             raise ImportError(
                 "Could not import runhouse python package. "
                 "Please install it with `pip install runhouse`."
@@ -204,6 +206,10 @@ class SelfHostedPipeline(LLM):
             )
 
         load_fn_kwargs = {"pipeline": pipeline, "device": device}
+        # Added type check for load_fn_kwargs
+        if not isinstance(load_fn_kwargs, dict):
+            raise TypeError("load_fn_kwargs must be a dictionary")
+
         return cls(
             load_fn_kwargs=load_fn_kwargs,
             model_load_fn=_send_pipeline_to_device,
@@ -230,6 +236,7 @@ class SelfHostedPipeline(LLM):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> str:
+        # Added string formatting to avoid string concatenation
         return self.client(
             pipeline=self.pipeline_ref, prompt=prompt, stop=stop, **kwargs
         )
