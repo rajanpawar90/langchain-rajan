@@ -1,2 +1,4 @@
-position: 1
-label: 'Techniques'
+{
+  "position": 1,
+  "label": "Techniques"
+}
