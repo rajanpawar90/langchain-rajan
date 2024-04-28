@@ -78,7 +78,7 @@ class SpacyEmbeddings(BaseModel, Embeddings):
         Returns:
             A list of embeddings, one for each document.
         """
-        return [self.nlp(text).vector.tolist() for text in texts]  # type: ignore[misc]
+        return [self.nlp(text).vector for text in texts]
 
     def embed_query(self, text: str) -> List[float]:
         """
@@ -90,30 +90,6 @@ class SpacyEmbeddings(BaseModel, Embeddings):
         Returns:
             The embedding for the text.
         """
-        return self.nlp(text).vector.tolist()  # type: ignore[misc]
+        return self.nlp(text).vector
 
-    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
-        """
-        Asynchronously generates embeddings for a list of documents.
-        This method is not implemented and raises a NotImplementedError.
 
-        Args:
-            texts (List[str]): The documents to generate embeddings for.
-
-        Raises:
-            NotImplementedError: This method is not implemented.
-        """
-        raise NotImplementedError("Asynchronous embedding generation is not supported.")
-
-    async def aembed_query(self, text: str) -> List[float]:
-        """
-        Asynchronously generates an embedding for a single piece of text.
-        This method is not implemented and raises a NotImplementedError.
-
-        Args:
-            text (str): The text to generate an embedding for.
-
-        Raises:
-            NotImplementedError: This method is not implemented.
-        """
-        raise NotImplementedError("Asynchronous embedding generation is not supported.")
