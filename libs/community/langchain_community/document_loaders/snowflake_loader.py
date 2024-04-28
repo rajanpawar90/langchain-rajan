@@ -3,8 +3,15 @@ from __future__ import annotations
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from langchain_core.documents import Document
-
 from langchain_community.document_loaders.base import BaseLoader
+
+try:
+    import snowflake.connector
+except ImportError as ex:
+    raise ImportError(
+        "Could not import snowflake-connector-python package. "
+        "Please install it with `pip install snowflake-connector-python`."
+    ) from ex
 
 
 class SnowflakeLoader(BaseLoader):
@@ -16,6 +23,8 @@ class SnowflakeLoader(BaseLoader):
     are written into the `page_content` and none into the `metadata`.
 
     """
+
+    __version__ = "0.1.0"
 
     def __init__(
         self,
@@ -61,14 +70,6 @@ class SnowflakeLoader(BaseLoader):
         self.metadata_columns = metadata_columns if metadata_columns is not None else []
 
     def _execute_query(self) -> List[Dict[str, Any]]:
-        try:
-            import snowflake.connector
-        except ImportError as ex:
-            raise ImportError(
-                "Could not import snowflake-connector-python package. "
-                "Please install it with `pip install snowflake-connector-python`."
-            ) from ex
-
         conn = snowflake.connector.connect(
             user=self.user,
             password=self.password,
@@ -92,6 +93,7 @@ class SnowflakeLoader(BaseLoader):
             query_result = []
         finally:
             cur.close()
+            conn.close()
         return query_result
 
     def _get_columns(
@@ -107,18 +109,46 @@ class SnowflakeLoader(BaseLoader):
             metadata_columns = []
         return page_content_columns or [], metadata_columns
 
-    def lazy_load(self) -> Iterator[Document]:
+    def load(self) -> List[Document]:
         query_result = self._execute_query()
-        if isinstance(query_result, Exception):
-            print(f"An error occurred during the query: {query_result}")  # noqa: T201
+        if not query_result:
+            print("Query returned no results.")
+            return []
+        if not all(isinstance(row, dict) for row in query_result):
+            print("Query result is not a list of dictionaries.")
             return []
         page_content_columns, metadata_columns = self._get_columns(query_result)
         if "*" in page_content_columns:
             page_content_columns = list(query_result[0].keys())
+        documents = []
         for row in query_result:
+            if not all(isinstance(value, str) for value in row.values()):
+                print("Row contains non-string values.")
+                continue
             page_content = "\n".join(
                 f"{k}: {v}" for k, v in row.items() if k in page_content_columns
             )
             metadata = {k: v for k, v in row.items() if k in metadata_columns}
-            doc = Document(page_content=page_content, metadata=metadata)
-            yield doc
+            documents.append(Document(page_content=page_content, metadata=metadata))
+        return documents
+
+    def lazy_load(self) -> Iterator[Document]:
+        query_result = self._execute_query()
+        if not query_result:
+            print("Query returned no results.")
+            return
+        if not all(isinstance(row, dict) for row in query_result):
+            print("Query result is not a list of dictionaries.")
+            return
+        page_content_columns, metadata_columns = self._get_columns(query_result)
+        if "*" in page_content_columns:
+            page_content_columns = list(query_result[0].keys())
+        for row in query_result:
+            if not all(isinstance(value, str) for value in row.values()):
+                print("Row contains non-string values.")
+                continue
+            page_content = "\n".join(
+                f"{k}: {v}" for k, v in row.items() if k in page_content_columns
+            )
+            metadata = {k: v for k, v in row.items() if k in metadata_columns}
+            yield Document(page_content=page_content, metadata=metadata)
