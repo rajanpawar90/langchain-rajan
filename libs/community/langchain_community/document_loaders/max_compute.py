@@ -31,8 +31,8 @@ class MaxComputeLoader(BaseLoader):
         """
         self.query = query
         self.api_wrapper = api_wrapper
-        self.page_content_columns = page_content_columns
-        self.metadata_columns = metadata_columns
+        self.page_content_columns = page_content_columns or []
+        self.metadata_columns = metadata_columns or []
 
     @classmethod
     def from_params(
@@ -65,16 +65,9 @@ class MaxComputeLoader(BaseLoader):
         return cls(query, api_wrapper, **kwargs)
 
     def lazy_load(self) -> Iterator[Document]:
+        """Lazy load documents from MaxCompute."""
         for row in self.api_wrapper.query(self.query):
-            if self.page_content_columns:
-                page_content_data = {
-                    k: v for k, v in row.items() if k in self.page_content_columns
-                }
-            else:
-                page_content_data = row
-            page_content = "\n".join(f"{k}: {v}" for k, v in page_content_data.items())
-            if self.metadata_columns:
-                metadata = {k: v for k, v in row.items() if k in self.metadata_columns}
-            else:
-                metadata = {k: v for k, v in row.items() if k not in page_content_data}
+            page_content_data = {k: v for k, v in row.items() if k in self.page_content_columns}
+            page_content = "\n".join(f"{k}: {v}" for k, v in page_content_data.items()) if page_content_data else ""
+            metadata = {k: v for k, v in row.items() if k in self.metadata_columns and k not in page_content_data}
             yield Document(page_content=page_content, metadata=metadata)
