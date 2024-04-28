@@ -1,11 +1,10 @@
 from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
-from langchain_core.embeddings import Embeddings
-from langchain_core.pydantic_v1 import BaseModel, Extra, root_validator
+from fastembed import TextEmbedding  # Use the latest version of fastembed
+from pydantic import BaseModel, Extra, PrivateAttr, root_validator, validator
 
-
-class FastEmbedEmbeddings(BaseModel, Embeddings):
+class FastEmbedEmbeddings(BaseModel, Extra=Extra.forbid):
     """Qdrant FastEmbedding models.
     FastEmbed is a lightweight, fast, Python library built for embedding generation.
     See more documentation at:
@@ -32,12 +31,12 @@ class FastEmbedEmbeddings(BaseModel, Embeddings):
     Unknown behavior for values > 512.
     """
 
-    cache_dir: Optional[str]
+    cache_dir: Optional[str] = None
     """The path to the cache directory.
     Defaults to `local_cache` in the parent directory
     """
 
-    threads: Optional[int]
+    threads: Optional[int] = None
     """The number of threads single onnxruntime session can use.
     Defaults to None
     """
@@ -47,15 +46,10 @@ class FastEmbedEmbeddings(BaseModel, Embeddings):
     The available options are: "default" and "passage"
     """
 
-    _model: Any  # : :meta private:
-
-    class Config:
-        """Configuration for this pydantic object."""
-
-        extra = Extra.forbid
+    _model: Any = PrivateAttr(None)  # : :meta private:
 
     @root_validator()
-    def validate_environment(cls, values: Dict) -> Dict:
+    def validate_environment(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """Validate that FastEmbed has been installed."""
         model_name = values.get("model_name")
         max_length = values.get("max_length")
@@ -63,9 +57,6 @@ class FastEmbedEmbeddings(BaseModel, Embeddings):
         threads = values.get("threads")
 
         try:
-            # >= v0.2.0
-            from fastembed import TextEmbedding
-
             values["_model"] = TextEmbedding(
                 model_name=model_name,
                 max_length=max_length,
@@ -73,22 +64,23 @@ class FastEmbedEmbeddings(BaseModel, Embeddings):
                 threads=threads,
             )
         except ImportError as ie:
-            try:
-                # < v0.2.0
-                from fastembed.embedding import FlagEmbedding
-
-                values["_model"] = FlagEmbedding(
-                    model_name=model_name,
-                    max_length=max_length,
-                    cache_dir=cache_dir,
-                    threads=threads,
-                )
-            except ImportError:
-                raise ImportError(
-                    "Could not import 'fastembed' Python package. "
-                    "Please install it with `pip install fastembed`."
-                ) from ie
+            raise ImportError(
+                "Could not import 'fastembed' Python package. "
+                "Please install it with `pip install fastembed`."
+            ) from ie
         return values
+
+    @validator("texts", always=True)
+    def check_texts_type(cls, v):
+        if not isinstance(v, list):
+            raise ValueError("texts should be a list")
+        return v
+
+    @validator("texts")
+    def check_texts_length(cls, v):
+        if len(v) == 0:
+            raise ValueError("texts should not be empty")
+        return v
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for documents using FastEmbed.
@@ -99,12 +91,21 @@ class FastEmbedEmbeddings(BaseModel, Embeddings):
         Returns:
             List of embeddings, one for each text.
         """
+        if not texts:
+            return []
+
         embeddings: List[np.ndarray]
         if self.doc_embed_type == "passage":
             embeddings = self._model.passage_embed(texts)
         else:
             embeddings = self._model.embed(texts)
         return [e.tolist() for e in embeddings]
+
+    @validator("text", always=True)
+    def check_text_not_empty(cls, v):
+        if not v:
+            raise ValueError("text should not be empty")
+        return v
 
     def embed_query(self, text: str) -> List[float]:
         """Generate query embeddings using FastEmbed.
