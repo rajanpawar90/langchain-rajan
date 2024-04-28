@@ -1,6 +1,7 @@
 from functools import partial
 from typing import Any, Dict, List, Mapping, Optional, Set
 
+import pydantic
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
 from langchain_core.pydantic_v1 import Extra, Field, root_validator
@@ -24,7 +25,7 @@ class GPT4All(LLM):
             response = model("Once upon a time, ")
     """
 
-    model: str
+    model: str = Field(..., description="Path to the pre-trained GPT4All model file.")
     """Path to the pre-trained GPT4All model file."""
 
     backend: Optional[str] = Field(None, alias="backend")
@@ -57,28 +58,28 @@ class GPT4All(LLM):
     n_threads: Optional[int] = Field(4, alias="n_threads")
     """Number of threads to use."""
 
-    n_predict: Optional[int] = 256
+    n_predict: int = Field(256, alias="n_predict")
     """The maximum number of tokens to generate."""
 
-    temp: Optional[float] = 0.7
+    temp: float = Field(0.7, alias="temp")
     """The temperature to use for sampling."""
 
-    top_p: Optional[float] = 0.1
+    top_p: float = Field(0.1, alias="top_p")
     """The top-p value to use for sampling."""
 
-    top_k: Optional[int] = 40
+    top_k: int = Field(40, alias="top_k")
     """The top-k value to use for sampling."""
 
-    echo: Optional[bool] = False
+    echo: bool = Field(False, alias="echo")
     """Whether to echo the prompt."""
 
     stop: Optional[List[str]] = []
     """A list of strings to stop generation when encountered."""
 
-    repeat_last_n: Optional[int] = 64
+    repeat_last_n: int = Field(64, alias="repeat_last_n")
     "Last n tokens to penalize"
 
-    repeat_penalty: Optional[float] = 1.18
+    repeat_penalty: float = Field(1.18, alias="repeat_penalty")
     """The penalty to apply to repeated tokens."""
 
     n_batch: int = Field(8, alias="n_batch")
@@ -211,3 +212,4 @@ class GPT4All(LLM):
         if stop is not None:
             text = enforce_stop_tokens(text, stop)
         return text
+
