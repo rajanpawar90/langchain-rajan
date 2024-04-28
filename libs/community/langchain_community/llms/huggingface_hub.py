@@ -1,6 +1,7 @@
 import json
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Union
 
+import httpx
 from langchain_core._api.deprecation import deprecated
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.llms import LLM
@@ -19,8 +20,6 @@ VALID_TASKS_DICT = {
     "text2text-generation": "generated_text",
 }
 
-
-@deprecated("0.0.21", removal="0.2.0", alternative="HuggingFaceEndpoint")
 class HuggingFaceHub(LLM):
     """HuggingFaceHub  models.
     ! This class is deprecated, you should use HuggingFaceEndpoint instead.
@@ -135,15 +134,15 @@ class HuggingFaceHub(LLM):
         response = self.client.post(
             json={"inputs": prompt, "parameters": parameters}, task=self.task
         )
-        response = json.loads(response.decode())
+        response = json.loads(response.content)
         if "error" in response:
             raise ValueError(f"Error raised by inference API: {response['error']}")
 
         response_key = VALID_TASKS_DICT[self.task]  # type: ignore
         if isinstance(response, list):
-            text = response[0][response_key]
+            text = response[0].get(response_key, "")
         else:
-            text = response[response_key]
+            text = response.get(response_key, "")
 
         if stop is not None:
             # This is a bit hacky, but I can't figure out a better way to enforce
