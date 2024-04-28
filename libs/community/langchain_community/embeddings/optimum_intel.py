@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 from langchain_core.embeddings import Embeddings
 from langchain_core.pydantic_v1 import BaseModel, Extra
 
-
 class QuantizedBiEncoderEmbeddings(BaseModel, Embeddings):
     """Quantized bi-encoders embedding models.
 
@@ -129,9 +128,12 @@ For more information, please visit:
     def _cls_pooling(outputs: Any) -> Any:
         if isinstance(outputs, dict):
             token_embeddings = outputs["last_hidden_state"]
+            if "last_hidden_state" in outputs:
+                return token_embeddings[:, 0]
+            else:
+                raise ValueError("last_hidden_state not found in outputs")
         else:
-            token_embeddings = outputs[0]
-        return token_embeddings[:, 0]
+            return outputs[0][:, 0]
 
     @staticmethod
     def _mean_pooling(outputs: Any, attention_mask: Any) -> Any:
@@ -143,25 +145,33 @@ For more information, please visit:
             ) from e
         if isinstance(outputs, dict):
             token_embeddings = outputs["last_hidden_state"]
+            if "last_hidden_state" in outputs:
+                if attention_mask is not None:
+                    input_mask_expanded = (
+                        attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+                    )
+                    sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+                    sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+                    return sum_embeddings / sum_mask
+                else:
+                    raise ValueError("attention_mask not found")
+            else:
+                raise ValueError("last_hidden_state not found in outputs")
         else:
-            # First element of model_output contains all token embeddings
-            token_embeddings = outputs[0]
-        input_mask_expanded = (
-            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        )
-        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
-        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-        return sum_embeddings / sum_mask
+            return outputs[0][:, 0]
 
     def _embed_text(self, texts: List[str]) -> List[List[float]]:
-        inputs = self.transformer_tokenizer(
-            texts,
-            max_length=self.max_seq_len,
-            truncation=True,
-            padding=self.padding,
-            return_tensors="pt",
-        )
-        return self._embed(inputs).tolist()
+        if texts is not None:
+            inputs = self.transformer_tokenizer(
+                texts,
+                max_length=self.max_seq_len,
+                truncation=True,
+                padding=self.padding,
+                return_tensors="pt",
+            )
+            return self._embed(inputs).tolist()
+        else:
+            raise ValueError("texts not found")
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Embed a list of text documents using the Optimized Embedder model.
@@ -203,6 +213,10 @@ For more information, please visit:
         return vectors
 
     def embed_query(self, text: str) -> List[float]:
-        if self.query_instruction:
+        if self.query_instruction and text is not None:
             text = self.query_instruction + text
-        return self._embed_text([text])[0]
+            return self._embed_text([text])[0]
+        elif text is None:
+            raise ValueError("text not found")
+        else:
+            raise ValueError("query_instruction not found")
