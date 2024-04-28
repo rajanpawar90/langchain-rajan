@@ -1,29 +1,33 @@
-# Grammar for subset of JSON - doesn't support full string or number syntax
+# Grammar for a subset of JSON
 
-root  ::= object
+root  ::= object | array
 value ::= object | array | string | number | boolean | "null"
 
 object ::=
   "{" ws (
             string ":" ws value
     ("," ws string ":" ws value)*
-  )? "}"
+  )? "}"  | "{}"
 
 array  ::=
   "[" ws (
             value
     ("," ws value)*
-  )? "]"
+  )? "]"  | "[]"
 
 string  ::=
   "\"" (
-    [^"\\] |
-    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes
+    ~"\""  (* any character except double quote *)
+    | "\\" (["\\/bfnrt] | "u" hex hex hex hex)
   )* "\"" ws
 
-# Only plain integers currently
-number  ::= "-"? [0-9]+ ws
+number  ::= "-"? (
+    [0-9]+
+    | [0-9]+ "." [0-9]* (("e" | "E") ("+" | "-")? [0-9]+)?
+    | "." [0-9]+ (("e" | "E") ("+" | "-")? [0-9]+)?
+) ws
+
 boolean ::= ("true" | "false") ws
 
-# Optional space: by convention, applied in this grammar after literal chars when allowed
 ws ::= ([ \t\n] ws)?
+hex ::= [0-9a-fA-F]
