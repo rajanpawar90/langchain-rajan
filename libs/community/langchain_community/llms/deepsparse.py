@@ -1,14 +1,16 @@
 # flake8: noqa
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
+
+import asyncio
+from deepsparse import Pipeline
 from langchain_core.pydantic_v1 import root_validator
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models.llms import LLM
-from langchain_community.llms.utils import enforce_stop_tokens
 from langchain_core.outputs import GenerationChunk
-
+from langchain_community.llms.utils import enforce_stop_tokens
 
 class DeepSparse(LLM):
     """Neural Magic DeepSparse LLM interface.
@@ -75,44 +77,6 @@ class DeepSparse(LLM):
         )
         return values
 
-    def _call(
-        self,
-        prompt: str,
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> str:
-        """Generate text from a prompt.
-        Args:
-            prompt: The prompt to generate text from.
-            stop: A list of strings to stop generation when encountered.
-        Returns:
-            The generated text.
-        Example:
-            .. code-block:: python
-                from langchain_community.llms import DeepSparse
-                llm = DeepSparse(model="zoo:nlg/text_generation/codegen_mono-350m/pytorch/huggingface/bigpython_bigquery_thepile/base_quant-none")
-                llm("Tell me a joke.")
-        """
-        if self.streaming:
-            combined_output = ""
-            for chunk in self._stream(
-                prompt=prompt, stop=stop, run_manager=run_manager, **kwargs
-            ):
-                combined_output += chunk.text
-            text = combined_output
-        else:
-            text = (
-                self.pipeline(sequences=prompt, **self.generation_config)
-                .generations[0]
-                .text
-            )
-
-        if stop is not None:
-            text = enforce_stop_tokens(text, stop)
-
-        return text
-
     async def _acall(
         self,
         prompt: str,
@@ -120,36 +84,9 @@ class DeepSparse(LLM):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> str:
-        """Generate text from a prompt.
-        Args:
-            prompt: The prompt to generate text from.
-            stop: A list of strings to stop generation when encountered.
-        Returns:
-            The generated text.
-        Example:
-            .. code-block:: python
-                from langchain_community.llms import DeepSparse
-                llm = DeepSparse(model="zoo:nlg/text_generation/codegen_mono-350m/pytorch/huggingface/bigpython_bigquery_thepile/base_quant-none")
-                llm("Tell me a joke.")
-        """
-        if self.streaming:
-            combined_output = ""
-            async for chunk in self._astream(
-                prompt=prompt, stop=stop, run_manager=run_manager, **kwargs
-            ):
-                combined_output += chunk.text
-            text = combined_output
-        else:
-            text = (
-                self.pipeline(sequences=prompt, **self.generation_config)
-                .generations[0]
-                .text
-            )
-
-        if stop is not None:
-            text = enforce_stop_tokens(text, stop)
-
-        return text
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self._call, prompt, stop, run_manager, **kwargs
+        )
 
     def _stream(
         self,
@@ -158,36 +95,7 @@ class DeepSparse(LLM):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> Iterator[GenerationChunk]:
-        """Yields results objects as they are generated in real time.
-        It also calls the callback manager's on_llm_new_token event with
-        similar parameters to the OpenAI LLM class method of the same name.
-        Args:
-            prompt: The prompt to pass into the model.
-            stop: Optional list of stop words to use when generating.
-        Returns:
-            A generator representing the stream of tokens being generated.
-        Yields:
-            A dictionary like object containing a string token.
-        Example:
-            .. code-block:: python
-                from langchain_community.llms import DeepSparse
-                llm = DeepSparse(
-                    model="zoo:nlg/text_generation/codegen_mono-350m/pytorch/huggingface/bigpython_bigquery_thepile/base_quant-none",
-                    streaming=True
-                )
-                for chunk in llm.stream("Tell me a joke",
-                        stop=["'","\n"]):
-                    print(chunk, end='', flush=True)  # noqa: T201
-        """
-        inference = self.pipeline(
-            sequences=prompt, streaming=True, **self.generation_config
-        )
-        for token in inference:
-            chunk = GenerationChunk(text=token.generations[0].text)
-            yield chunk
-
-            if run_manager:
-                run_manager.on_llm_new_token(token=chunk.text)
+        return self._astream(prompt, stop, run_manager, **kwargs)
 
     async def _astream(
         self,
@@ -196,33 +104,18 @@ class DeepSparse(LLM):
         run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> AsyncIterator[GenerationChunk]:
-        """Yields results objects as they are generated in real time.
-        It also calls the callback manager's on_llm_new_token event with
-        similar parameters to the OpenAI LLM class method of the same name.
-        Args:
-            prompt: The prompt to pass into the model.
-            stop: Optional list of stop words to use when generating.
-        Returns:
-            A generator representing the stream of tokens being generated.
-        Yields:
-            A dictionary like object containing a string token.
-        Example:
-            .. code-block:: python
-                from langchain_community.llms import DeepSparse
-                llm = DeepSparse(
-                    model="zoo:nlg/text_generation/codegen_mono-350m/pytorch/huggingface/bigpython_bigquery_thepile/base_quant-none",
-                    streaming=True
-                )
-                for chunk in llm.stream("Tell me a joke",
-                        stop=["'","\n"]):
-                    print(chunk, end='', flush=True)  # noqa: T201
-        """
-        inference = self.pipeline(
-            sequences=prompt, streaming=True, **self.generation_config
-        )
-        for token in inference:
-            chunk = GenerationChunk(text=token.generations[0].text)
-            yield chunk
+        task = self.pipeline(sequences=prompt, **self.generation_config)
 
-            if run_manager:
-                await run_manager.on_llm_new_token(token=chunk.text)
+        if self.streaming:
+            for token in task:
+                chunk = GenerationChunk(text=token.generations[0].text)
+                yield chunk
+
+                if run_manager:
+                    run_manager.on_llm_new_token(token=chunk.text)
+                    await run_manager.on_llm_new_token.wait()
+        else:
+            text = (task.generations[0].text)
+            if stop is not None:
+                text = enforce_stop_tokens(text, stop)
+            yield GenerationChunk(text=text)
