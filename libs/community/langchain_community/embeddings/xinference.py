@@ -3,9 +3,7 @@ from typing import Any, List, Optional
 
 from langchain_core.embeddings import Embeddings
 
-
 class XinferenceEmbeddings(Embeddings):
-
     """Xinference embedding models.
 
     To use, you should have the xinference library installed:
@@ -94,13 +92,18 @@ class XinferenceEmbeddings(Embeddings):
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Embed a list of documents using Xinference.
+
         Args:
             texts: The list of texts to embed.
+
         Returns:
             List of embeddings, one for each text.
-        """
 
+        """
         model = self.client.get_model(self.model_uid)
+
+        if model is None:
+            raise ValueError(f"Model with UID {self.model_uid} not found")
 
         embeddings = [
             model.create_embedding(text)["data"][0]["embedding"] for text in texts
@@ -109,15 +112,23 @@ class XinferenceEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> List[float]:
         """Embed a query of documents using Xinference.
+
         Args:
             text: The text to embed.
+
         Returns:
             Embeddings for the text.
-        """
 
+        """
         model = self.client.get_model(self.model_uid)
 
+        if model is None:
+            raise ValueError(f"Model with UID {self.model_uid} not found")
+
         embedding_res = model.create_embedding(text)
+
+        if embedding_res is None:
+            raise ValueError(f"Failed to create embedding for text {text}")
 
         embedding = embedding_res["data"][0]["embedding"]
 
