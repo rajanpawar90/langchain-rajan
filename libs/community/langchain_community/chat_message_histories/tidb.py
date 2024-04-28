@@ -3,14 +3,15 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 
 logger = logging.getLogger(__name__)
-
 
 class TiDBChatMessageHistory(BaseChatMessageHistory):
     """
@@ -35,15 +36,17 @@ class TiDBChatMessageHistory(BaseChatMessageHistory):
                 Defaults to "langchain_message_store".
             earliest_time (Optional[datetime], optional): The earliest time to retrieve messages from.
                 Defaults to None.
-        """  # noqa
-
+        """
         self.session_id = session_id
         self.table_name = table_name
         self.earliest_time = earliest_time
-        self.cache: List = []
+        self.cache: List[BaseMessage] = []
 
         # Set up SQLAlchemy engine and session
-        self.engine = create_engine(connection_string)
+        self.engine = create_engine(
+            connection_string,
+            poolclass=StaticPool,
+        )
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
 
@@ -104,7 +107,7 @@ class TiDBChatMessageHistory(BaseChatMessageHistory):
     @property
     def messages(self) -> List[BaseMessage]:  # type: ignore[override]
         """returns all messages"""
-        if len(self.cache) == 0:
+        if not self.cache:
             self.reload_cache()
         return self.cache
 
