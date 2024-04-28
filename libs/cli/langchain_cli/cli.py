@@ -24,8 +24,8 @@ app.add_typer(
 
 def version_callback(show_version: bool) -> None:
     if show_version:
-        typer.echo(f"langchain-cli {__version__}")
-        raise typer.Exit()
+        typer.secho(f"langchain-cli {__version__}", fg=typer.colors.BRIGHT_BLUE)
+        raise typer.Abort()
 
 
 @app.callback()
@@ -44,19 +44,20 @@ def main(
 
 @app.command()
 def serve(
-    *,
     port: Annotated[
-        Optional[int], typer.Option(help="The port to run the server on")
+        Optional[int], typer.Argument(help="The port to run the server on")
     ] = None,
     host: Annotated[
-        Optional[str], typer.Option(help="The host to run the server on")
+        Optional[str], typer.Argument(help="The host to run the server on")
     ] = None,
 ) -> None:
     """
     Start the LangServe app, whether it's a template or an app.
+
+    If the current working directory contains a `pyproject.toml` file with a `[langchain]` table,
+    this command will start a LangServe template server. Otherwise, it will start a LangServe app server.
     """
 
-    # see if is a template
     try:
         project_dir = get_package_root()
         pyproject = project_dir / "pyproject.toml"
