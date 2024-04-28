@@ -1,3 +1,4 @@
+import importlib.metadata
 from typing import List
 
 from langchain_community.document_loaders.unstructured import UnstructuredFileLoader
@@ -27,19 +28,23 @@ class UnstructuredMarkdownLoader(UnstructuredFileLoader):
     https://unstructured-io.github.io/unstructured/core/partition.html#partition-md
     """
 
-    def _get_elements(self) -> List:
-        from unstructured.__version__ import __version__ as __unstructured_version__
-        from unstructured.partition.md import partition_md
+    def __init_subclass__(cls, **kwargs):
+        if cls is not UnstructuredMarkdownLoader:
+            return
 
-        # NOTE(MthwRobinson) - enables the loader to work when you're using pre-release
-        # versions of unstructured like 0.4.17-dev1
-        _unstructured_version = __unstructured_version__.split("-")[0]
-        unstructured_version = tuple([int(x) for x in _unstructured_version.split(".")])
+        if not hasattr(cls, "_get_elements"):
+            raise ValueError(
+                "Subclasses of UnstructuredMarkdownLoader must override the `_get_elements` method."
+            )
+
+    def _get_elements(self) -> List[str]:
+        unstructured_version = tuple(map(int, importlib.metadata.version("unstructured").split(".")))
 
         if unstructured_version < (0, 4, 16):
             raise ValueError(
-                f"You are on unstructured version {__unstructured_version__}. "
+                f"You are on unstructured version {importlib.metadata.version('unstructured')}. "
                 "Partitioning markdown files is only supported in unstructured>=0.4.16."
             )
 
+        partition_md = importlib.import_module("unstructured.partition.md").partition_md
         return partition_md(filename=self.file_path, **self.unstructured_kwargs)
