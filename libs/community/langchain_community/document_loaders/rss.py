@@ -1,10 +1,22 @@
 import logging
 from typing import Any, Iterator, List, Optional, Sequence
 
+import feedparser
 from langchain_core.documents import Document
-
 from langchain_community.document_loaders.base import BaseLoader
 from langchain_community.document_loaders.news import NewsURLLoader
+try:
+    import listparser
+except ImportError:
+    listparser = None
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
+try:
+    import newspaper
+except ImportError:
+    newspaper = None
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +43,7 @@ class RSSFeedLoader(BaseLoader):
             loader = RSSFeedLoader(
                 urls=["<url-1>", "<url-2>"],
             )
-            docs = loader.load()
+            docs = loader.load_documents()
 
     The loader uses feedparser to parse RSS feeds.  The feedparser library is not installed by default so you should
     install it if using this loader:
@@ -44,6 +56,8 @@ class RSSFeedLoader(BaseLoader):
     https://newspaper.readthedocs.io/en/latest/
     """  # noqa: E501
 
+    __module__ = "langchain_community.document_loaders.rss"
+
     def __init__(
         self,
         urls: Optional[Sequence[str]] = None,
@@ -53,9 +67,7 @@ class RSSFeedLoader(BaseLoader):
         **newsloader_kwargs: Any,
     ) -> None:
         """Initialize with urls or OPML."""
-        if (urls is None) == (
-            opml is None
-        ):  # This is True if both are None or neither is None
+        if (urls is None) == (opml is None):
             raise ValueError(
                 "Provide either the urls or the opml argument, but not both."
             )
@@ -65,17 +77,9 @@ class RSSFeedLoader(BaseLoader):
         self.show_progress_bar = show_progress_bar
         self.newsloader_kwargs = newsloader_kwargs
 
-    def load(self) -> List[Document]:
+    def load_documents(self) -> List[Document]:
         iter = self.lazy_load()
-        if self.show_progress_bar:
-            try:
-                from tqdm import tqdm
-            except ImportError as e:
-                raise ImportError(
-                    "Package tqdm must be installed if show_progress_bar=True. "
-                    "Please install with 'pip install tqdm' or set "
-                    "show_progress_bar=False."
-                ) from e
+        if self.show_progress_bar and tqdm is not None:
             iter = tqdm(iter)
         return list(iter)
 
@@ -83,21 +87,17 @@ class RSSFeedLoader(BaseLoader):
     def _get_urls(self) -> Sequence[str]:
         if self.urls:
             return self.urls
-        try:
-            import listparser
-        except ImportError as e:
+        if listparser is None:
             raise ImportError(
                 "Package listparser must be installed if the opml arg is used. "
                 "Please install with 'pip install listparser' or use the "
                 "urls arg instead."
-            ) from e
+            )
         rss = listparser.parse(self.opml)
         return [feed.url for feed in rss.feeds]
 
     def lazy_load(self) -> Iterator[Document]:
-        try:
-            import feedparser  # noqa:F401
-        except ImportError:
+        if feedparser is None:
             raise ImportError(
                 "feedparser package not found, please install it with "
                 "`pip install feedparser`"
@@ -117,6 +117,11 @@ class RSSFeedLoader(BaseLoader):
                 else:
                     raise e
             try:
+                if newspaper is None:
+                    raise ImportError(
+                        "newspaper package not found, please install it with "
+                        "`pip install newspaper3k`"
+                    )
                 for entry in feed.entries:
                     loader = NewsURLLoader(
                         urls=[entry.link],
@@ -131,3 +136,6 @@ class RSSFeedLoader(BaseLoader):
                     continue
                 else:
                     raise e
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(urls={self.urls}, opml={self.opml}, continue_on_failure={self.continue_on_failure}, show_progress_bar={self.show_progress_bar})"
