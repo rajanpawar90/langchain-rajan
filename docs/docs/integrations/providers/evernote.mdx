@@ -1,20 +1,28 @@
-# EverNote
+# EverNote Document Loader
 
->[EverNote](https://evernote.com/) is intended for archiving and creating notes in which photos, audio and saved web content can be embedded. Notes are stored in virtual "notebooks" and can be tagged, annotated, edited, searched, and exported.
+## Overview
+
+EverNote is a powerful note-taking application that allows users to create and archive notes with various types of media, such as photos, audio, and saved web content. Notes can be organized in virtual "notebooks", tagged, annotated, edited, searched, and exported.
 
 ## Installation and Setup
 
-First, you need to install `lxml` and `html2text` python packages.
+To use the EverNote Document Loader, first, make sure you have the `lxml` and `html2text` Python packages installed:
 
-```bash
-pip install lxml
-pip install html2text
-```
+
+
 
 ## Document Loader
 
-See a [usage example](/docs/integrations/document_loaders/evernote).
+The `EverNoteLoader` class is designed to load EverNote notes and convert them into a format suitable for further processing.
 
-```python
-from langchain_community.document_loaders import EverNoteLoader
-```
+
+
+
+Here's an example of how to use the `EverNoteLoader` class:
+
+
+
+
+Replace `your_api_key`, `your_api_secret`, `your_username`, `your_password`, and `note_guid` with your actual EverNote API credentials and the note guid you want to load.
+
+The `load()` method returns a string containing the note content in a plain text format.
