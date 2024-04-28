@@ -1,5 +1,17 @@
-FROM ontotext/graphdb:10.5.1
-RUN mkdir -p /opt/graphdb/dist/data/repositories/langchain
-COPY config.ttl /opt/graphdb/dist/data/repositories/langchain/
-COPY graphdb_create.sh /run.sh
-ENTRYPOINT bash /run.sh
+# Use the latest version of the official GraphDB image
+FROM ontotext/graphdb:latest
+
+# Create the required directory for the repository
+RUN mkdir -p /data/repositories/langchain
+
+# Copy the configuration file to the appropriate location
+COPY config.ttl /data/repositories/langchain/
+
+# Copy the script to run the container
+COPY graphdb_create.sh /graphdb_create.sh
+
+# Make the script executable
+RUN chmod +x /graphdb_create.sh
+
+# Set the entrypoint to run the script
+ENTRYPOINT ["bash", "/graphdb_create.sh"]
