@@ -16,8 +16,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 
 from langchain_community.llms.volcengine_maas import VolcEngineMaasBase
 
-
-def _convert_message_to_dict(message: BaseMessage) -> dict:
+def _convert_message_to_dict(message: BaseMessage) -> dict[str, str]:
     if isinstance(message, SystemMessage):
         message_dict = {"role": "system", "content": message.content}
     elif isinstance(message, HumanMessage):
@@ -30,13 +29,11 @@ def _convert_message_to_dict(message: BaseMessage) -> dict:
         raise ValueError(f"Got unknown type {message}")
     return message_dict
 
-
 def convert_dict_to_message(_dict: Mapping[str, Any]) -> AIMessage:
     """Convert a dict to a message."""
 
     content = _dict.get("choice", {}).get("message", {}).get("content", "")
     return AIMessage(content=content)
-
 
 class VolcEngineMaasChat(BaseChatModel, VolcEngineMaasBase):
     """Volc Engine Maas hosts a plethora of models.
@@ -137,7 +134,7 @@ class VolcEngineMaasChat(BaseChatModel, VolcEngineMaasBase):
         else:
             if stop is not None:
                 kwargs["stop"] = stop
-            params = self._convert_prompt_msg_params(messages, **kwargs)
+            params: Dict[str, Any] = self._convert_prompt_msg_params(messages, **kwargs)
             res = self.client.chat(params)
             msg = convert_dict_to_message(res)
             completion = cast(str, msg.content)
