@@ -1,52 +1,15 @@
-from __future__ import annotations
+import os
+from typing import Any, Dict, Optional
 
-import logging
-from typing import TYPE_CHECKING, Any, Optional
+import whylogs as why
+from whylogs.api.writer.whylabs import WhyLabsWriter
+from whylogs.experimental.core.udf_schema import udf_schema
 
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.utils import get_from_env
-
-if TYPE_CHECKING:
-    from whylogs.api.logger.logger import Logger
-
-diagnostic_logger = logging.getLogger(__name__)
+import langkit
+from langkit.callback_handler import get_callback_instance
 
 
-def import_langkit(
-    sentiment: bool = False,
-    toxicity: bool = False,
-    themes: bool = False,
-) -> Any:
-    """Import the langkit python package and raise an error if it is not installed.
-
-    Args:
-        sentiment: Whether to import the langkit.sentiment module. Defaults to False.
-        toxicity: Whether to import the langkit.toxicity module. Defaults to False.
-        themes: Whether to import the langkit.themes module. Defaults to False.
-
-    Returns:
-        The imported langkit module.
-    """
-    try:
-        import langkit  # noqa: F401
-        import langkit.regexes  # noqa: F401
-        import langkit.textstat  # noqa: F401
-
-        if sentiment:
-            import langkit.sentiment  # noqa: F401
-        if toxicity:
-            import langkit.toxicity  # noqa: F401
-        if themes:
-            import langkit.themes  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "To use the whylabs callback manager you need to have the `langkit` python "
-            "package installed. Please install it with `pip install langkit`."
-        )
-    return langkit
-
-
-class WhyLabsCallbackHandler(BaseCallbackHandler):
+class WhyLabsCallbackHandler(langkit.BaseCallbackHandler):
     """
     Callback Handler for logging to WhyLabs. This callback handler utilizes
     `langkit` to extract features from the prompts & responses when interacting with
@@ -54,67 +17,47 @@ class WhyLabsCallbackHandler(BaseCallbackHandler):
     over time to detect issues relating to hallucinations, prompt engineering,
     or output validation. LangKit is an LLM monitoring toolkit developed by WhyLabs.
 
-    Here are some examples of what can be monitored with LangKit:
-    * Text Quality
-      - readability score
-      - complexity and grade scores
-    * Text Relevance
-      - Similarity scores between prompt/responses
-      - Similarity scores against user-defined themes
-      - Topic classification
-    * Security and Privacy
-      - patterns - count of strings matching a user-defined regex pattern group
-      - jailbreaks - similarity scores with respect to known jailbreak attempts
-      - prompt injection - similarity scores with respect to known prompt attacks
-      - refusals - similarity scores with respect to known LLM refusal responses
-    * Sentiment and Toxicity
-      - sentiment analysis
-      - toxicity analysis
-
-    For more information, see https://docs.whylabs.ai/docs/language-model-monitoring
-    or check out the LangKit repo here: https://github.com/whylabs/langkit
-
-    ---
     Args:
-        api_key (Optional[str]): WhyLabs API key. Optional because the preferred
-            way to specify the API key is with environment variable
-            WHYLABS_API_KEY.
-        org_id (Optional[str]): WhyLabs organization id to write profiles to.
-            Optional because the preferred way to specify the organization id is
-            with environment variable WHYLABS_DEFAULT_ORG_ID.
-        dataset_id (Optional[str]): WhyLabs dataset id to write profiles to.
-            Optional because the preferred way to specify the dataset id is
-            with environment variable WHYLABS_DEFAULT_DATASET_ID.
-        sentiment (bool): Whether to enable sentiment analysis. Defaults to False.
-        toxicity (bool): Whether to enable toxicity analysis. Defaults to False.
-        themes (bool): Whether to enable theme analysis. Defaults to False.
+        logger (Optional[whylogs.logger.Logger]): WhyLabs logger instance.
+            Optional because a new logger will be created if not provided.
     """
 
-    def __init__(self, logger: Logger, handler: Any):
-        """Initiate the rolling logger."""
+    def __init__(self, logger: Optional[whylogs.logger.Logger] = None):
         super().__init__()
-        if hasattr(handler, "init"):
-            handler.init(self)
-        if hasattr(handler, "_get_callbacks"):
-            self._callbacks = handler._get_callbacks()
-        else:
-            self._callbacks = dict()
-            diagnostic_logger.warning("initialized handler without callbacks.")
-        self._logger = logger
+        self.logger = logger or self._create_logger()
+
+    def _create_logger(self) -> whylogs.logger.Logger:
+        api_key = os.getenv("WHYLABS_API_KEY")
+        org_id = os.getenv("WHYLABS_DEFAULT_ORG_ID")
+        dataset_id = os.getenv("WHYLABS_DEFAULT_DATASET_ID")
+
+        if not all([api_key, org_id, dataset_id]):
+            raise ValueError(
+                "To use the WhyLabsCallbackHandler, you need to set the following environment variables: WHYLABS_API_KEY, WHYLABS_DEFAULT_ORG_ID, WHYLABS_DEFAULT_DATASET_ID"
+            )
+
+        whylabs_writer = WhyLabsWriter(api_key=api_key, org_id=org_id, dataset_id=dataset_id)
+
+        logger = why.logger(
+            mode="rolling", interval=5, when="M", schema=udf_schema()
+        )
+
+        logger.append_writer(writer=whylabs_writer)
+        return logger
 
     def flush(self) -> None:
         """Explicitly write current profile if using a rolling logger."""
-        if self._logger and hasattr(self._logger, "_do_rollover"):
-            self._logger._do_rollover()
+        if self.logger and hasattr(self.logger, "_do_rollover"):
+            self.logger._do_rollover()
             diagnostic_logger.info("Flushing WhyLabs logger, writing profile...")
 
     def close(self) -> None:
         """Close any loggers to allow writing out of any profiles before exiting."""
-        if self._logger and hasattr(self._logger, "close"):
-            self._logger.close()
+        if self.logger and hasattr(self.logger, "close"):
+            self.logger.close()
             diagnostic_logger.info("Closing WhyLabs logger, see you next time!")
 
-    def __enter__(self) -> WhyLabsCallbackHandler:
+    def __enter__(self) -> "WhyLabsCallbackHandler":
         return self
 
     def __exit__(
@@ -132,8 +75,8 @@ class WhyLabsCallbackHandler(BaseCallbackHandler):
         sentiment: bool = False,
         toxicity: bool = False,
         themes: bool = False,
-        logger: Optional[Logger] = None,
-    ) -> WhyLabsCallbackHandler:
+        logger: Optional[whylogs.logger.Logger] = None,
+    ) -> "WhyLabsCallbackHandler":
         """Instantiate whylogs Logger from params.
 
         Args:
@@ -154,38 +97,13 @@ class WhyLabsCallbackHandler(BaseCallbackHandler):
             themes (bool): If True will initialize a model to calculate
                 distance to configured themes. Defaults to None and will not gather this
                 metric.
-            logger (Optional[Logger]): If specified will bind the configured logger as
-                the telemetry gathering agent. Defaults to LangKit schema with periodic
-                WhyLabs writer.
+            logger (Optional[whylogs.logger.Logger]): If specified will bind the
+                configured logger as the telemetry gathering agent. Defaults to LangKit
+                schema with periodic WhyLabs writer.
         """
-        # langkit library will import necessary whylogs libraries
         import_langkit(sentiment=sentiment, toxicity=toxicity, themes=themes)
 
-        import whylogs as why
-        from langkit.callback_handler import get_callback_instance
-        from whylogs.api.writer.whylabs import WhyLabsWriter
-        from whylogs.experimental.core.udf_schema import udf_schema
-
-        if logger is None:
-            api_key = api_key or get_from_env("api_key", "WHYLABS_API_KEY")
-            org_id = org_id or get_from_env("org_id", "WHYLABS_DEFAULT_ORG_ID")
-            dataset_id = dataset_id or get_from_env(
-                "dataset_id", "WHYLABS_DEFAULT_DATASET_ID"
-            )
-            whylabs_writer = WhyLabsWriter(
-                api_key=api_key, org_id=org_id, dataset_id=dataset_id
-            )
-
-            whylabs_logger = why.logger(
-                mode="rolling", interval=5, when="M", schema=udf_schema()
-            )
-
-            whylabs_logger.append_writer(writer=whylabs_writer)
-        else:
-            diagnostic_logger.info("Using passed in whylogs logger {logger}")
-            whylabs_logger = logger
-
-        callback_handler_cls = get_callback_instance(logger=whylabs_logger, impl=cls)
+        callback_handler_cls = get_callback_instance(logger=logger, impl=cls)
         diagnostic_logger.info(
             "Started whylogs Logger with WhyLabsWriter and initialized LangKit. 📝"
         )
