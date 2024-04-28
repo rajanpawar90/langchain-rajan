@@ -1,17 +1,24 @@
 import re
 from pathlib import Path
-from typing import Iterator, Union
+from typing import Dict, Iterator, Union
 
 from langchain_core.documents import Document
 
-from langchain_community.document_loaders.base import BaseLoader
+FRONT_MATTER_REGEX = re.compile(r"^---\n(.*?)\n---\n", re.MULTILINE | re.DOTALL)
+"""Regex to match front matter metadata in markdown files."""
+
+TASK_REGEX = re.compile(r"\s*-\s\[\s\]\s.*|\s*\[\s\]\s.*")
+"""Regex to match tasks in markdown files."""
+
+HASHTAG_REGEX = re.compile(r"#")
+"""Regex to match hashtags in markdown files."""
+
+DOCLINK_REGEX = re.compile(r"\[\[.*?\]\]")
+"""Regex to match doclinks in markdown files."""
 
 
 class AcreomLoader(BaseLoader):
     """Load `acreom` vault from a directory."""
-
-    FRONT_MATTER_REGEX = re.compile(r"^---\n(.*?)\n---\n", re.MULTILINE | re.DOTALL)
-    """Regex to match front matter metadata in markdown files."""
 
     def __init__(
         self,
@@ -20,55 +27,48 @@ class AcreomLoader(BaseLoader):
         collect_metadata: bool = True,
     ):
         """Initialize the loader."""
-        self.file_path = path
+        self.file_path = Path(path)
         """Path to the directory containing the markdown files."""
         self.encoding = encoding
         """Encoding to use when reading the files."""
         self.collect_metadata = collect_metadata
         """Whether to collect metadata from the front matter."""
 
-    def _parse_front_matter(self, content: str) -> dict:
+    def _parse_front_matter(self, content: str) -> Dict[str, str]:
         """Parse front matter metadata from the content and return it as a dict."""
-        if not self.collect_metadata:
-            return {}
-        match = self.FRONT_MATTER_REGEX.search(content)
         front_matter = {}
-        if match:
-            lines = match.group(1).split("\n")
-            for line in lines:
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    front_matter[key.strip()] = value.strip()
-                else:
-                    # Skip lines without a colon
-                    continue
+        for line in content.split("\n"):
+            if ":" in line:
+                key, value = line.split(":", 1)
+                front_matter[key.strip()] = value.strip()
         return front_matter
 
     def _remove_front_matter(self, content: str) -> str:
         """Remove front matter metadata from the given content."""
-        if not self.collect_metadata:
-            return content
-        return self.FRONT_MATTER_REGEX.sub("", content)
+        return FRONT_MATTER_REGEX.sub("", content)
 
     def _process_acreom_content(self, content: str) -> str:
-        # remove acreom specific elements from content that
-        # do not contribute to the context of current document
-        content = re.sub(r"\s*-\s\[\s\]\s.*|\s*\[\s\]\s.*", "", content)  # rm tasks
-        content = re.sub(r"#", "", content)  # rm hashtags
-        content = re.sub(r"\[\[.*?\]\]", "", content)  # rm doclinks
+        """Remove acreom specific elements from content that do not contribute to the context of current document."""
+        content = TASK_REGEX.sub("", content)
+        content = HASHTAG_REGEX.sub("", content)
+        content = DOCLINK_REGEX.sub("", content)
         return content
 
     def lazy_load(self) -> Iterator[Document]:
-        ps = list(Path(self.file_path).glob("**/*.md"))
+        """Load markdown files as Documents."""
+        for p in self.file_path.glob("**/*.md"):
+            try:
+                content = p.read_text(encoding=self.encoding)
+            except Exception:
+                continue
 
-        for p in ps:
-            with open(p, encoding=self.encoding) as f:
-                text = f.read()
+            if self.collect_metadata:
+                front_matter = self._parse_front_matter(content)
+                content = self._remove_front_matter(content)
+            else:
+                front_matter = {}
 
-            front_matter = self._parse_front_matter(text)
-            text = self._remove_front_matter(text)
-
-            text = self._process_acreom_content(text)
+            content = self._process_acreom_content(content)
 
             metadata = {
                 "source": str(p.name),
@@ -76,4 +76,4 @@ class AcreomLoader(BaseLoader):
                 **front_matter,
             }
 
-            yield Document(page_content=text, metadata=metadata)
+            yield Document(page_content=content, metadata=metadata)
