@@ -14,13 +14,16 @@ from langchain_community.utilities.steam import SteamWebAPIWrapper
 class SteamToolkit(BaseToolkit):
     """Steam Toolkit."""
 
-    tools: List[BaseTool] = []
+    def __init__(self, tools: List[BaseTool]):
+        """Initialize the SteamToolkit with a list of tools."""
+        self.tools = tools
 
     @classmethod
     def from_steam_api_wrapper(
         cls, steam_api_wrapper: SteamWebAPIWrapper
     ) -> "SteamToolkit":
-        operations: List[dict] = [
+        """Create a SteamToolkit instance from a SteamWebAPIWrapper."""
+        operations = [
             {
                 "mode": "get_games_details",
                 "name": "Get Games Details",
@@ -32,6 +35,7 @@ class SteamToolkit(BaseToolkit):
                 "description": STEAM_GET_RECOMMENDED_GAMES,
             },
         ]
+
         tools = [
             SteamWebAPIQueryRun(
                 name=action["name"],
@@ -41,6 +45,7 @@ class SteamToolkit(BaseToolkit):
             )
             for action in operations
         ]
+
         return cls(tools=tools)
 
     def get_tools(self) -> List[BaseTool]:
