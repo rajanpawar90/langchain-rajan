@@ -7,16 +7,20 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.language_models.llms import LLM
+from langchain_core.language_models.base import LLM
 from langchain_core.runnables import RunnableConfig
-
 
 class FakeListLLM(LLM):
     """Fake LLM for testing purposes."""
 
-    responses: List[str]
-    sleep: Optional[float] = None
-    i: int = 0
+    def __init__(
+        self,
+        responses: List[str],
+        sleep: Optional[float] = None,
+    ):
+        self.responses = responses
+        self.sleep = sleep
+        self.i = 0
 
     @property
     def _llm_type(self) -> str:
@@ -32,10 +36,7 @@ class FakeListLLM(LLM):
     ) -> str:
         """Return next response"""
         response = self.responses[self.i]
-        if self.i < len(self.responses) - 1:
-            self.i += 1
-        else:
-            self.i = 0
+        self.i = (self.i + 1) % len(self.responses)
         return response
 
     async def _acall(
@@ -47,10 +48,7 @@ class FakeListLLM(LLM):
     ) -> str:
         """Return next response"""
         response = self.responses[self.i]
-        if self.i < len(self.responses) - 1:
-            self.i += 1
-        else:
-            self.i = 0
+        self.i = (self.i + 1) % len(self.responses)
         return response
 
     @property
@@ -61,20 +59,6 @@ class FakeListLLM(LLM):
 class FakeStreamingListLLM(FakeListLLM):
     """Fake streaming list LLM for testing purposes."""
 
-    def stream(
-        self,
-        input: LanguageModelInput,
-        config: Optional[RunnableConfig] = None,
-        *,
-        stop: Optional[List[str]] = None,
-        **kwargs: Any,
-    ) -> Iterator[str]:
-        result = self.invoke(input, config)
-        for c in result:
-            if self.sleep is not None:
-                time.sleep(self.sleep)
-            yield c
-
     async def astream(
         self,
         input: LanguageModelInput,
@@ -82,9 +66,4 @@ class FakeStreamingListLLM(FakeListLLM):
         *,
         stop: Optional[List[str]] = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
-        result = await self.ainvoke(input, config)
-        for c in result:
-            if self.sleep is not None:
-                await asyncio.sleep(self.sleep)
-            yield c
+
