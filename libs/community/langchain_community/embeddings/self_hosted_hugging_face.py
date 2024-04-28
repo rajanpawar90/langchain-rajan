@@ -14,45 +14,54 @@ DEFAULT_QUERY_INSTRUCTION = (
 logger = logging.getLogger(__name__)
 
 
-def _embed_documents(client: Any, *args: Any, **kwargs: Any) -> List[List[float]]:
+def _embed_documents(client: Any, texts: List[str]) -> List[List[float]]:
     """Inference function to send to the remote hardware.
 
     Accepts a sentence_transformer model_id and
     returns a list of embeddings for each document in the batch.
     """
-    return client.encode(*args, **kwargs)
+    instruction_pairs = [(DEFAULT_EMBED_INSTRUCTION, text) for text in texts]
+    embeddings = client(instruction_pairs)
+    return [embedding.tolist() for embedding in embeddings]
 
 
 def load_embedding_model(model_id: str, instruct: bool = False, device: int = 0) -> Any:
     """Load the embedding model."""
-    if not instruct:
-        import sentence_transformers
+    try:
+        if not instruct:
+            import sentence_transformers
 
-        client = sentence_transformers.SentenceTransformer(model_id)
-    else:
-        from InstructorEmbedding import INSTRUCTOR
+            client = sentence_transformers.SentenceTransformer(model_id)
+        else:
+            if importlib.util.find_spec("InstructorEmbedding") is None:
+                raise ImportError("InstructorEmbedding not found")
+            from InstructorEmbedding import INSTRUCTOR
 
-        client = INSTRUCTOR(model_id)
+            client = INSTRUCTOR(model_id)
 
-    if importlib.util.find_spec("torch") is not None:
-        import torch
+        if importlib.util.find_spec("torch") is not None:
+            import torch
 
-        cuda_device_count = torch.cuda.device_count()
-        if device < -1 or (device >= cuda_device_count):
-            raise ValueError(
-                f"Got device=={device}, "
-                f"device is required to be within [-1, {cuda_device_count})"
-            )
-        if device < 0 and cuda_device_count > 0:
-            logger.warning(
-                "Device has %d GPUs available. "
-                "Provide device={deviceId} to `from_model_id` to use available"
-                "GPUs for execution. deviceId is -1 for CPU and "
-                "can be a positive integer associated with CUDA device id.",
-                cuda_device_count,
-            )
+            cuda_device_count = torch.cuda.device_count()
+            if device < -1 or (device >= cuda_device_count):
+                raise ValueError(
+                    f"Got device=={device}, "
+                    f"device is required to be within [-1, {cuda_device_count})"
+                )
+            if device < 0 and cuda_device_count > 0:
+                logger.warning(
+                    "Device has %d GPUs available. "
+                    "Provide device={deviceId} to `from_model_id` to use available"
+                    "GPUs for execution. deviceId is -1 for CPU and "
+                    "can be a positive integer associated with CUDA device id.",
+                    cuda_device_count,
+                )
 
         client = client.to(device)
+    except Exception as e:
+        logger.error(f"Failed to load model {model_id}: {e}")
+        raise
+
     return client
 
 
@@ -98,6 +107,28 @@ class SelfHostedHuggingFaceEmbeddings(SelfHostedEmbeddings):
         load_fn_kwargs["device"] = load_fn_kwargs.get("device", 0)
         super().__init__(load_fn_kwargs=load_fn_kwargs, **kwargs)
 
+    def __str__(self) -> str:
+        return (
+            f"SelfHostedHuggingFaceEmbeddings(model_id={self.model_id},"
+            f"hardware={self.hardware},"
+            f"model_load_fn={self.model_load_fn},"
+            f"load_fn_kwargs={self.load_fn_kwargs},"
+            f"inference_fn={self.inference_fn})"
+        )
+
+    def embed_query(self, text: str) -> List[float]:
+        """Compute query embeddings using a HuggingFace instruct model.
+
+        Args:
+            text: The text to embed.
+
+        Returns:
+            Embeddings for the text.
+        """
+        instruction_pair = [DEFAULT_QUERY_INSTRUCTION, text]
+        embedding = self.client(self.pipeline_ref, [instruction_pair])[0]
+        return embedding.tolist()
+
 
 class SelfHostedHuggingFaceInstructEmbeddings(SelfHostedHuggingFaceEmbeddings):
     """HuggingFace InstructEmbedding models on self-hosted remote hardware.
@@ -138,31 +169,13 @@ class SelfHostedHuggingFaceInstructEmbeddings(SelfHostedHuggingFaceEmbeddings):
         load_fn_kwargs["instruct"] = load_fn_kwargs.get("instruct", True)
         load_fn_kwargs["device"] = load_fn_kwargs.get("device", 0)
         super().__init__(load_fn_kwargs=load_fn_kwargs, **kwargs)
+        self.model_name = self.model_id
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """Compute doc embeddings using a HuggingFace instruct model.
-
-        Args:
-            texts: The list of texts to embed.
-
-        Returns:
-            List of embeddings, one for each text.
-        """
-        instruction_pairs = []
-        for text in texts:
-            instruction_pairs.append([self.embed_instruction, text])
-        embeddings = self.client(self.pipeline_ref, instruction_pairs)
-        return embeddings.tolist()
-
-    def embed_query(self, text: str) -> List[float]:
-        """Compute query embeddings using a HuggingFace instruct model.
-
-        Args:
-            text: The text to embed.
-
-        Returns:
-            Embeddings for the text.
-        """
-        instruction_pair = [self.query_instruction, text]
-        embedding = self.client(self.pipeline_ref, [instruction_pair])[0]
-        return embedding.tolist()
+    def __str__(self) -> str:
+        return (
+            f"SelfHostedHuggingFaceInstructEmbeddings(model_id={self.model_id},"
+            f"hardware={self.hardware},"
+            f"model_load_fn={self.model_load_fn},"
+            f"load_fn_kwargs={self.load_fn_kwargs},"
+            f"inference_fn={self.inference_fn})"
+        )
