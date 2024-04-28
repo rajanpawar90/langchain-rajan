@@ -1,28 +1,14 @@
 from __future__ import annotations
 
 import concurrent.futures
+import numpy as np
+import sklearn
 from typing import Any, Iterable, List, Optional
 
-import numpy as np
-from langchain_core.callbacks import CallbackManagerForRetrieverRun
+import langchain_core.callbacks
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
-
-
-def create_index(contexts: List[str], embeddings: Embeddings) -> np.ndarray:
-    """
-    Create an index of embeddings for a list of contexts.
-
-    Args:
-        contexts: List of contexts to embed.
-        embeddings: Embeddings model to use.
-
-    Returns:
-        Index of embeddings.
-    """
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        return np.array(list(executor.map(embeddings.embed_query, contexts)))
 
 
 class SVMRetriever(BaseRetriever):
@@ -34,7 +20,7 @@ class SVMRetriever(BaseRetriever):
 
     embeddings: Embeddings
     """Embeddings model to use."""
-    index: Any
+    index: np.ndarray
     """Index of embeddings."""
     texts: List[str]
     """List of texts to index."""
@@ -46,10 +32,36 @@ class SVMRetriever(BaseRetriever):
     """Threshold for relevancy."""
 
     class Config:
-
         """Configuration for this pydantic object."""
 
         arbitrary_types_allowed = True
+
+    def __init__(
+        self,
+        embeddings: Embeddings,
+        index: np.ndarray,
+        texts: List[str],
+        metadatas: Optional[List[dict]] = None,
+    ):
+        self.embeddings = embeddings
+        self.index = index
+        self.texts = texts
+        self.metadatas = metadatas
+
+    @staticmethod
+    def _embed_texts(texts: List[str], embeddings: Embeddings) -> np.ndarray:
+        """Embed a list of texts using the given embeddings.
+
+        Args:
+            texts: List of texts to embed.
+            embeddings: Embeddings model to use.
+
+        Returns:
+            Embedded texts as a 2D numpy array.
+        """
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            raw_embeds = list(executor.map(embeddings.embed_query, texts))
+        return np.array(raw_embeds)
 
     @classmethod
     def from_texts(
@@ -59,14 +71,30 @@ class SVMRetriever(BaseRetriever):
         metadatas: Optional[List[dict]] = None,
         **kwargs: Any,
     ) -> SVMRetriever:
-        index = create_index(texts, embeddings)
-        return cls(
-            embeddings=embeddings,
-            index=index,
-            texts=texts,
-            metadatas=metadatas,
-            **kwargs,
-        )
+        """Create an SVMRetriever instance from a list of texts.
+
+        Args:
+            texts: List of texts to index.
+            embeddings: Embeddings model to use.
+            metadatas: Optional list of metadatas corresponding with each text.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            An SVMRetriever instance.
+        """
+        if sklearn is None:
+            raise ImportError(
+                "Could not import scikit-learn, please install with `pip install "
+                "scikit-learn`."
+            )
+
+        if numpy is None:
+            raise ImportError(
+                "Could not import numpy, please install with `pip install numpy`."
+            )
+
+        index = cls._embed_texts(texts, embeddings)
+        return cls(embeddings=embeddings, index=index, texts=texts, metadatas=metadatas)
 
     @classmethod
     def from_documents(
@@ -75,14 +103,36 @@ class SVMRetriever(BaseRetriever):
         embeddings: Embeddings,
         **kwargs: Any,
     ) -> SVMRetriever:
-        texts, metadatas = zip(*((d.page_content, d.metadata) for d in documents))
-        return cls.from_texts(
-            texts=texts, embeddings=embeddings, metadatas=metadatas, **kwargs
-        )
+        """Create an SVMRetriever instance from a list of Document objects.
+
+        Args:
+            documents: List of Document objects to index.
+            embeddings: Embeddings model to use.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            An SVMRetriever instance.
+        """
+        texts = [d.page_content for d in documents]
+        metadatas = [d.metadata for d in documents]
+
+        if len(texts) != len(metadatas):
+            raise ValueError("Length of texts and metadatas must be equal.")
+
+        return cls.from_texts(texts=texts, embeddings=embeddings, metadatas=metadatas, **kwargs)
 
     def _get_relevant_documents(
-        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+        self, query: str, *, run_manager: langchain_core.callbacks.CallbackManagerForRetrieverRun
     ) -> List[Document]:
+        """Get relevant documents for a given query.
+
+        Args:
+            query: The query to search for.
+            run_manager: The callback manager for the retriever run.
+
+        Returns:
+            List of relevant documents.
+        """
         try:
             from sklearn import svm
         except ImportError:
@@ -90,6 +140,9 @@ class SVMRetriever(BaseRetriever):
                 "Could not import scikit-learn, please install with `pip install "
                 "scikit-learn`."
             )
+
+        if not self.texts:
+            raise ValueError("No texts have been indexed.")
 
         query_embeds = np.array(self.embeddings.embed_query(query))
         x = np.concatenate([query_embeds[None, ...], self.index])
