@@ -5,23 +5,25 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import Iterator, List, Union
+from bs4 import BeautifulSoup
 
+import langchain_core.chat_sessions
+import langchain_core.messages
 from langchain_core.chat_sessions import ChatSession
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-
 from langchain_community.chat_loaders.base import BaseChatLoader
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramChatLoader(BaseChatLoader):
-    """Load `telegram` conversations to LangChain chat messages.
+    """Load Telegram conversations to LangChain chat messages.
 
     To export, use the Telegram Desktop app from
     https://desktop.telegram.org/, select a conversation, click the three dots
     in the top right corner, and select "Export chat history". Then select
-    "Machine-readable JSON" (preferred) to export. Note: the 'lite' versions of
-    the desktop app (like "Telegram for MacOS") do not support exporting chat
+    "Machine-readable JSON" (preferred) to export. Note: the 'lite' versions
+    of the desktop app (like "Telegram for MacOS") do not support exporting chat
     history.
     """
 
@@ -47,15 +49,10 @@ class TelegramChatLoader(BaseChatLoader):
             ChatSession: The loaded chat session.
         """
         try:
-            from bs4 import BeautifulSoup
-        except ImportError:
-            raise ImportError(
-                "Please install the 'beautifulsoup4' package to load"
-                " Telegram HTML files. You can do this by running"
-                "'pip install beautifulsoup4' in your terminal."
-            )
-        with open(file_path, "r", encoding="utf-8") as file:
-            soup = BeautifulSoup(file, "html.parser")
+            with open(file_path, "r", encoding="utf-8") as html_file:
+                soup = BeautifulSoup(html_file, "html.parser")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {file_path}")
 
         results: List[Union[HumanMessage, AIMessage]] = []
         previous_sender = None
@@ -92,8 +89,11 @@ class TelegramChatLoader(BaseChatLoader):
         Returns:
             ChatSession: The loaded chat session.
         """
-        with open(file_path, "r", encoding="utf-8") as file:
-            data = json.load(file)
+        try:
+            with open(file_path, "r", encoding="utf-8") as json_file:
+                data = json.load(json_file)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {file_path}")
 
         messages = data.get("messages", [])
         results: List[BaseMessage] = []
@@ -135,7 +135,8 @@ class TelegramChatLoader(BaseChatLoader):
                 for file in zip_file.namelist():
                     if file.endswith((".html", ".json")):
                         with tempfile.TemporaryDirectory() as temp_dir:
-                            yield zip_file.extract(file, path=temp_dir)
+                            file_path = zip_file.extract(file, path=temp_dir)
+                            yield os.path.join(temp_dir, file_path)
 
     def lazy_load(self) -> Iterator[ChatSession]:
         """Lazy load the messages from the chat file and yield them
