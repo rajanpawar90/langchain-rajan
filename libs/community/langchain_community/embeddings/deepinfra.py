@@ -1,12 +1,13 @@
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional
 
 import requests
 from langchain_core.embeddings import Embeddings
 from langchain_core.pydantic_v1 import BaseModel, Extra, root_validator
 from langchain_core.utils import get_from_dict_or_env
+from pydantic_core import CoercionDict
+from pydantic_core.core_schema import FieldSchema, v
 
 DEFAULT_MODEL_ID = "sentence-transformers/clip-ViT-B-32"
-
 
 class DeepInfraEmbeddings(BaseModel, Embeddings):
     """Deep Infra's embedding inference service.
@@ -69,7 +70,13 @@ class DeepInfraEmbeddings(BaseModel, Embeddings):
         """Get the identifying parameters."""
         return {"model_id": self.model_id}
 
-    def _embed(self, input: List[str]) -> List[List[float]]:
+    @overload
+    def _embed(self, input: List[str]) -> List[List[float]]: ...
+
+    @overload
+    def _embed(self, input: str) -> List[float]: ...
+
+    def _embed(self, input: List[str] | str) -> List[List[float]] | List[float]:
         _model_kwargs = self.model_kwargs or {}
         # HTTP headers for authorization
         headers = {
@@ -77,8 +84,9 @@ class DeepInfraEmbeddings(BaseModel, Embeddings):
             "Content-Type": "application/json",
         }
         # send request
+        session = requests.Session()
         try:
-            res = requests.post(
+            res = session.post(
                 f"https://api.deepinfra.com/v1/inference/{self.model_id}",
                 headers=headers,
                 json={"inputs": input, "normalize": self.normalize, **_model_kwargs},
@@ -99,9 +107,17 @@ class DeepInfraEmbeddings(BaseModel, Embeddings):
                 f"Error raised by inference API: {e}.\nResponse: {res.text}"
             )
 
+        if isinstance(input, str):
+            return embeddings[0]
         return embeddings
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    @v(
+        schema=FieldSchema(
+            default_coerce_empty=CoercionDict(int=0),
+            ge=0,
+        )
+    )
+    def embed_documents(self, texts: List[str], **data: Literal[{}]) -> List[List[float]]:
         """Embed documents using a Deep Infra deployed embedding model.
 
         Args:
@@ -114,7 +130,13 @@ class DeepInfraEmbeddings(BaseModel, Embeddings):
         embeddings = self._embed(instruction_pairs)
         return embeddings
 
-    def embed_query(self, text: str) -> List[float]:
+    @v(
+        schema=FieldSchema(
+            default_coerce_empty=CoercionDict(int=0),
+            ge=0,
+        )
+    )
+    def embed_query(self, text: str, **data: Literal[{}]) -> List[float]:
         """Embed a query using a Deep Infra deployed embedding model.
 
         Args:
@@ -124,5 +146,5 @@ class DeepInfraEmbeddings(BaseModel, Embeddings):
             Embeddings for the text.
         """
         instruction_pair = f"{self.query_instruction}{text}"
-        embedding = self._embed([instruction_pair])[0]
+        embedding = self._embed(instruction_pair)
         return embedding
