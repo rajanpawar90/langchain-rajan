@@ -1,27 +1,86 @@
-"""Astra DB - based chat message history, based on astrapy."""
-from __future__ import annotations
-
+import asyncio
+import dataclasses
 import json
 import time
-from typing import TYPE_CHECKING, List, Optional, Sequence
-
-from langchain_community.utilities.astradb import (
-    SetupMode,
-    _AstraDBCollectionEnvironment,
+from typing import (
+    Any,
+    AsyncContextManager,
+    Awaitable,
+    ClassVar,
+    Final,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Self,
+    TypeVar,
+    Union,
+    cast,
 )
 
-if TYPE_CHECKING:
-    from astrapy.db import AstraDB, AsyncAstraDB
-
+import astra
+from astra.exceptions import AstraConnectionError
+from dataclasses import dataclass
 from langchain_core._api.deprecation import deprecated
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import (
-    BaseMessage,
-    message_to_dict,
-    messages_from_dict,
-)
+from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 
-DEFAULT_COLLECTION_NAME = "langchain_message_store"
+DEFAULT_COLLECTION_NAME: Final = "langchain_message_store"
+
+T = TypeVar("T", bound="AstraDBChatMessageHistory")
+
+
+@dataclass
+class _AstraDBCollectionEnvironment:
+    collection_name: str
+    token: Optional[str] = None
+    api_endpoint: Optional[str] = None
+    astra_db_client: Optional[astra.Client] = None
+    async_astra_db_client: Optional[astra.AsyncClient] = None
+    namespace: Optional[str] = None
+    setup_mode: Literal["SYNC", "ASYNC", "OFF"] = "SYNC"
+    pre_delete_collection: bool = False
+
+    async def aensure_db_setup(self) -> None:
+        if self.async_astra_db_client is None:
+            if self.token is None or self.api_endpoint is None:
+                raise ValueError("token and api_endpoint are required")
+            self.async_astra_db_client = astra.async_connect(
+                self.api_endpoint,
+                self.token,
+                namespace=self.namespace,
+            )
+            if self.pre_delete_collection:
+                await self.async_delete_collection()
+            await self.async_create_collection()
+
+    async def async_create_collection(self) -> None:
+        if self.async_astra_db_client is None:
+            raise AstraConnectionError("No connection to Astra DB")
+        await self.async_astra_db_client.create_keyspace_and_collection(
+            keyspace=self.collection_name,
+            collection=self.collection_name,
+        )
+
+    async def async_delete_collection(self) -> None:
+        if self.async_astra_db_client is None:
+            raise AstraConnectionError("No connection to Astra DB")
+        await self.async_astra_db_client.delete_keyspace_and_collection(
+            keyspace=self.collection_name,
+            collection=self.collection_name,
+        )
+
+    @property
+    def collection(self) -> astra.Collection:
+        if self.astra_db_client is None:
+            raise AstraConnectionError("No connection to Astra DB")
+        return self.astra_db_client.collection(self.collection_name)
+
+    @property
+    def async_collection(self) -> astra.AsyncCollection:
+        if self.async_astra_db_client is None:
+            raise AstraConnectionError("No connection to Astra DB")
+        return self.async_astra_db_client.async_collection(self.collection_name)
 
 
 @deprecated(
@@ -29,7 +88,11 @@ DEFAULT_COLLECTION_NAME = "langchain_message_store"
     removal="0.2.0",
     alternative_import="langchain_astradb.AstraDBChatMessageHistory",
 )
-class AstraDBChatMessageHistory(BaseChatMessageHistory):
+class AstraDBChatMessageHistory(BaseChatMessageHistory, metaclass=dataclasses.Final):
+    collection_name: str
+    session_id: str
+    astra_env: _AstraDBCollectionEnvironment
+
     def __init__(
         self,
         *,
@@ -37,33 +100,14 @@ class AstraDBChatMessageHistory(BaseChatMessageHistory):
         collection_name: str = DEFAULT_COLLECTION_NAME,
         token: Optional[str] = None,
         api_endpoint: Optional[str] = None,
-        astra_db_client: Optional[AstraDB] = None,
-        async_astra_db_client: Optional[AsyncAstraDB] = None,
+        astra_db_client: Optional[astra.Client] = None,
+        async_astra_db_client: Optional[astra.AsyncClient] = None,
         namespace: Optional[str] = None,
-        setup_mode: SetupMode = SetupMode.SYNC,
+        setup_mode: Literal["SYNC", "ASYNC", "OFF"] = "SYNC",
         pre_delete_collection: bool = False,
     ) -> None:
-        """Chat message history that stores history in Astra DB.
-
-        Args:
-            session_id: arbitrary key that is used to store the messages
-                of a single chat session.
-            collection_name: name of the Astra DB collection to create/use.
-            token: API token for Astra DB usage.
-            api_endpoint: full URL to the API endpoint,
-                such as "https://<DB-ID>-us-east1.apps.astra.datastax.com".
-            astra_db_client: *alternative to token+api_endpoint*,
-                you can pass an already-created 'astrapy.db.AstraDB' instance.
-            async_astra_db_client: *alternative to token+api_endpoint*,
-                you can pass an already-created 'astrapy.db.AsyncAstraDB' instance.
-            namespace: namespace (aka keyspace) where the
-                collection is created. Defaults to the database's "default namespace".
-            setup_mode: mode used to create the Astra DB collection (SYNC, ASYNC or
-                OFF).
-            pre_delete_collection: whether to delete the collection
-                before creating it. If False and the collection already exists,
-                the collection will be used as is.
-        """
+        self.collection_name = collection_name
+        self.session_id = session_id
         self.astra_env = _AstraDBCollectionEnvironment(
             collection_name=collection_name,
             token=token,
@@ -74,16 +118,10 @@ class AstraDBChatMessageHistory(BaseChatMessageHistory):
             setup_mode=setup_mode,
             pre_delete_collection=pre_delete_collection,
         )
-
-        self.collection = self.astra_env.collection
-        self.async_collection = self.astra_env.async_collection
-
-        self.session_id = session_id
-        self.collection_name = collection_name
+        asyncio.run(self.astra_env.aensure_db_setup())
 
     @property
     def messages(self) -> List[BaseMessage]:
-        """Retrieve all session messages from DB"""
         self.astra_env.ensure_db_setup()
         message_blobs = [
             doc["body_blob"]
