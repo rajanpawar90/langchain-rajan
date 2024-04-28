@@ -1,5 +1,40 @@
-_type: prompt
+_type: generative
+id: joke-generator
 input_variables:
-    ["adjective", "content"]
-template: 
-    Tell me a {adjective} joke about {content}.
+    - adjective
+    - content
+output_variables:
+    - joke
+parameters:
+    - min_length: 10
+    - max_length: 30
+prompt_templates:
+    - template: 
+        "Tell me a {adjective} joke about {content}."
+      example: "Tell me a silly joke about cats."
+      min_length: 10
+      max_length: 20
+logic:
+    - step:
+        - action: generate_text
+          input_variables:
+            - text
+          parameters:
+            - min_length: ${min_length}
+            - max_length: ${max_length}
+          output_variables:
+            - joke
+          system_prompt: |
+            You are a helpful assistant that generates jokes. Given an adjective and a topic, generate a joke that is both {adjective} and related to the topic. The joke should be at least ${min_length} characters long and no longer than ${max_length} characters. Here are some examples:
+
+            Examples:
+            - Input: adjective="silly", content="cats"
+              Output: "Why don't cats play poker in the jungle? Too many cheetahs!"
+            - Input: adjective="funny", content="dogs"
+              Output: "Why did the scarecrow adopt a dog? Because he needed a bark-ing buddy!"
+
+            Now, generate a {adjective} joke about {content}:
+
+            {text}
+
+            Please ensure that the output is a valid joke that meets the specified criteria.
