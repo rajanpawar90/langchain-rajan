@@ -1,11 +1,6 @@
-from typing import Any, Dict, List, Tuple
-
-from langchain_core.pydantic_v1 import BaseModel, Extra, Field
+from pydantic import BaseModel, Extra, Field
 
 from langchain_community.cross_encoders.base import BaseCrossEncoder
-
-DEFAULT_MODEL_NAME = "BAAI/bge-reranker-base"
-
 
 class HuggingFaceCrossEncoder(BaseModel, BaseCrossEncoder):
     """HuggingFace cross encoder models.
@@ -23,18 +18,16 @@ class HuggingFaceCrossEncoder(BaseModel, BaseCrossEncoder):
             )
     """
 
-    client: Any  #: :meta private:
-    model_name: str = DEFAULT_MODEL_NAME
-    """Model name to use."""
-    model_kwargs: Dict[str, Any] = Field(default_factory=dict)
-    """Keyword arguments to pass to the model."""
+    DEFAULT_MODEL_NAME = "BAAI/bge-reranker-base"
 
-    def __init__(self, **kwargs: Any):
-        """Initialize the sentence_transformer."""
-        super().__init__(**kwargs)
+    client: Any
+    model_name: str = DEFAULT_MODEL_NAME
+    model_kwargs: dict = Field(default_factory=dict)
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
         try:
             import sentence_transformers
-
         except ImportError as exc:
             raise ImportError(
                 "Could not import sentence_transformers python package. "
@@ -48,7 +41,7 @@ class HuggingFaceCrossEncoder(BaseModel, BaseCrossEncoder):
     class Config:
         """Configuration for this pydantic object."""
 
-        extra = Extra.forbid
+        extra = Extra.allow
 
     def score(self, text_pairs: List[Tuple[str, str]]) -> List[float]:
         """Compute similarity scores using a HuggingFace transformer model.
@@ -60,4 +53,4 @@ class HuggingFaceCrossEncoder(BaseModel, BaseCrossEncoder):
             List of scores, one for each pair.
         """
         scores = self.client.predict(text_pairs)
-        return scores
+        return scores * 100  # Normalize scores to be between 0 and 100
