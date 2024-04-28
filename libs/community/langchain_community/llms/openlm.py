@@ -1,11 +1,12 @@
 from typing import Any, Dict
 
-from langchain_core.pydantic_v1 import root_validator
+import openlm
+from pydantic import root_validator
 
+from langchain_core.pydantic_v1 import BaseModel
 from langchain_community.llms.openai import BaseOpenAI
 
-
-class OpenLM(BaseOpenAI):
+class OpenLM(BaseOpenAI, BaseModel):
     """OpenLM models."""
 
     @classmethod
@@ -18,15 +19,14 @@ class OpenLM(BaseOpenAI):
 
     @root_validator()
     def validate_environment(cls, values: Dict) -> Dict:
-        try:
-            import openlm
-
-            values["client"] = openlm.Completion
-        except ImportError:
-            raise ImportError(
-                "Could not import openlm python package. "
-                "Please install it with `pip install openlm`."
-            )
-        if values["streaming"]:
+        if not values.get("client", False):
+            try:
+                values["client"] = openlm.Completion
+            except ImportError:
+                raise ImportError(
+                    "Could not import openlm python package. "
+                    "Please install it with `pip install openlm`."
+                )
+        if values.get("streaming", False):
             raise ValueError("Streaming not supported with openlm")
         return values
